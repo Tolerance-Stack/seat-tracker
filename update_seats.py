@@ -1,18 +1,20 @@
 import requests
 import json
+import re
 from datetime import datetime
 
+# We use the HTML pages now (Deep Scan), not the .json endpoints
 PRODUCTS = {
-    "Vario F": "https://scheel-mann.com/products/vario-f.json",
-    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.json",
-    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima.json",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new.json"
+    "Vario F": "https://scheel-mann.com/products/vario-f",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
 }
 
 def fetch_seat_data():
     current_date = datetime.now().strftime("%b %d, %Y")
     
-    html = """
+    html_output = """
     <!DOCTYPE html>
     <html>
     <head>
@@ -33,28 +35,43 @@ def fetch_seat_data():
     <body>
       <h3>Scheel-Mann Status <span class="sm-date">Updated: DATE_HERE</span></h3>
     """
-    
-    html = html.replace("DATE_HERE", current_date)
+    html_output = html_output.replace("DATE_HERE", current_date)
 
     for model_name, url in PRODUCTS.items():
         try:
-            print(f"--- Checking {model_name} ---")
+            print(f"--- Deep Scanning {model_name} ---")
             response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+            
             if response.status_code == 200:
-                data = response.json()
-                variants = data.get('product', {}).get('variants', [])
+                # Deep Scan: Look for the "ProductJson" script tag in the HTML
+                # This regex finds the JSON blob inside <script id="ProductJson-...">
+                match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
                 
-                html += f'<div class="sm-seat-title">{model_name}</div>'
-                html += '<table class="sm-status-table"><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
+                variants = []
+                if match:
+                    json_data = json.loads(match.group(1))
+                    variants = json_data.get('variants', [])
+                    print(f"Found {len(variants)} variants in hidden HTML data.")
+                else:
+                    # Fallback: try finding the generic 'var meta' json if ProductJson is missing
+                    print("ProductJson tag not found, trying fallback...")
+                    match_fallback = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', response.text)
+                    if match_fallback:
+                         json_data = json.loads(match_fallback.group(1))
+                         variants = json_data.get('product', {}).get('variants', [])
+
+                # Generate Table
+                html_output += f'<div class="sm-seat-title">{model_name}</div>'
+                html_output += '<table class="sm-status-table"><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
                 
                 for variant in variants:
                     raw_title = variant.get('title', '')
-                    # THE DEBUGGER: This prints the raw data to your GitHub logs
-                    print(f"DEBUG: {raw_title} | Available: {variant.get('available')} | Qty: {variant.get('inventory_quantity')}")
-
-                    is_available = variant.get('available', False)
+                    is_available = variant.get('available', False) # This should work now!
+                    
+                    # Clean up title
                     clean_title = raw_title.split(' - CURRENTLY')[0].strip()
                     
+                    # Determine Status
                     if not is_available:
                         display = f'<div class="option-unavailable">{clean_title}</div>'
                         status = '<span class="text-unavailable">Out of Stock</span>'
@@ -65,18 +82,19 @@ def fetch_seat_data():
                         display = clean_title
                         status = '<span class="status-available">In Stock</span>'
                     
-                    html += f'<tr><td>{display}</td><td>{status}</td></tr>'
+                    html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
                 
-                html += '</tbody></table>'
+                html_output += '</tbody></table>'
             else:
-                print(f"Failed to fetch {model_name}: {response.status_code}")
+                print(f"Failed to load page {model_name}: {response.status_code}")
+
         except Exception as e:
             print(f"Error on {model_name}: {e}")
             
-    html += "</body></html>"
+    html_output += "</body></html>"
     
     with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html)
+        f.write(html_output)
     print("Successfully generated index.html")
 
 if __name__ == "__main__":

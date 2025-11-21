@@ -1,14 +1,13 @@
 import requests
 import json
-import re
 from datetime import datetime
 
-# Deep Scan URLs
+# We use the .js endpoint which is the "AJAX API" used by the cart buttons
 PRODUCTS = {
-    "Vario F": "https://scheel-mann.com/products/vario-f",
-    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
-    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
+    "Vario F": "https://scheel-mann.com/products/vario-f.js",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.js",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima.js",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new.js"
 }
 
 def fetch_seat_data():
@@ -39,23 +38,18 @@ def fetch_seat_data():
 
     for model_name, url in PRODUCTS.items():
         try:
-            print(f"--- Scanning {model_name} ---")
+            print(f"--- Fetching AJAX Data for {model_name} ---")
             response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
             
             if response.status_code == 200:
-                # Regex to find the JSON data
-                match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
+                data = response.json()
+                variants = data.get('variants', [])
                 
-                variants = []
-                if match:
-                    json_data = json.loads(match.group(1))
-                    variants = json_data.get('variants', [])
-                else:
-                    # Fallback
-                    match_fallback = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', response.text)
-                    if match_fallback:
-                         json_data = json.loads(match_fallback.group(1))
-                         variants = json_data.get('product', {}).get('variants', [])
+                # --- DIAGNOSTIC PRINT ---
+                # This prints the raw keys of the first item to the log
+                if variants:
+                    print(f"DEBUG KEYS for {model_name}: {list(variants[0].keys())}")
+                    print(f"DEBUG SAMPLE: Available={variants[0].get('available')} | Inv={variants[0].get('inventory_quantity')}")
 
                 html_output += f'<div class="sm-seat-title">{model_name}</div>'
                 html_output += '<table class="sm-status-table"><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
@@ -63,36 +57,30 @@ def fetch_seat_data():
                 for variant in variants:
                     raw_title = variant.get('title', '')
                     clean_title = raw_title.split(' - CURRENTLY')[0].strip()
+                    
+                    # LOGIC: "available" is the standard Shopify AJAX key (True/False)
+                    is_available = variant.get('available', False)
+                    
+                    # Check for Pre-Order in text
+                    is_preorder_text = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
 
-                    # --- NEW LOGIC START ---
-                    available_flag = variant.get('available', False)
-                    inventory_policy = variant.get('inventory_policy', '')
-                    inventory_qty = variant.get('inventory_quantity', 0)
-
-                    # Debug print to see exactly what logic is triggered
-                    print(f"DEBUG: {clean_title} | Avail: {available_flag} | Policy: {inventory_policy} | Qty: {inventory_qty}")
-
-                    if available_flag:
-                        # If it says available, check if it's real stock or pre-order logic
-                        if "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper():
-                            display = clean_title
-                            status = '<span class="status-preorder">Pre-Order</span>'
-                        elif inventory_policy == 'continue' and inventory_qty <= 0:
-                            # "Continue selling when out of stock" usually means Pre-Order
+                    if is_available:
+                        if is_preorder_text:
                             display = clean_title
                             status = '<span class="status-preorder">Pre-Order</span>'
                         else:
                             display = clean_title
                             status = '<span class="status-available">In Stock</span>'
                     else:
-                        # Definitely unavailable
+                        # It is sold out
                         display = f'<div class="option-unavailable">{clean_title}</div>'
                         status = '<span class="text-unavailable">Out of Stock</span>'
-                    # --- NEW LOGIC END ---
 
                     html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
                 
                 html_output += '</tbody></table>'
+            else:
+                print(f"Failed to fetch {model_name}: {response.status_code}")
 
         except Exception as e:
             print(f"Error on {model_name}: {e}")

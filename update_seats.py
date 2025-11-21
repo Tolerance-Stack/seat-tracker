@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime
 
-# We use the HTML pages now (Deep Scan), not the .json endpoints
+# Deep Scan URLs
 PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
@@ -39,54 +39,60 @@ def fetch_seat_data():
 
     for model_name, url in PRODUCTS.items():
         try:
-            print(f"--- Deep Scanning {model_name} ---")
+            print(f"--- Scanning {model_name} ---")
             response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
             
             if response.status_code == 200:
-                # Deep Scan: Look for the "ProductJson" script tag in the HTML
-                # This regex finds the JSON blob inside <script id="ProductJson-...">
+                # Regex to find the JSON data
                 match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
                 
                 variants = []
                 if match:
                     json_data = json.loads(match.group(1))
                     variants = json_data.get('variants', [])
-                    print(f"Found {len(variants)} variants in hidden HTML data.")
                 else:
-                    # Fallback: try finding the generic 'var meta' json if ProductJson is missing
-                    print("ProductJson tag not found, trying fallback...")
+                    # Fallback
                     match_fallback = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', response.text)
                     if match_fallback:
                          json_data = json.loads(match_fallback.group(1))
                          variants = json_data.get('product', {}).get('variants', [])
 
-                # Generate Table
                 html_output += f'<div class="sm-seat-title">{model_name}</div>'
                 html_output += '<table class="sm-status-table"><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
                 
                 for variant in variants:
                     raw_title = variant.get('title', '')
-                    is_available = variant.get('available', False) # This should work now!
-                    
-                    # Clean up title
                     clean_title = raw_title.split(' - CURRENTLY')[0].strip()
-                    
-                    # Determine Status
-                    if not is_available:
+
+                    # --- NEW LOGIC START ---
+                    available_flag = variant.get('available', False)
+                    inventory_policy = variant.get('inventory_policy', '')
+                    inventory_qty = variant.get('inventory_quantity', 0)
+
+                    # Debug print to see exactly what logic is triggered
+                    print(f"DEBUG: {clean_title} | Avail: {available_flag} | Policy: {inventory_policy} | Qty: {inventory_qty}")
+
+                    if available_flag:
+                        # If it says available, check if it's real stock or pre-order logic
+                        if "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper():
+                            display = clean_title
+                            status = '<span class="status-preorder">Pre-Order</span>'
+                        elif inventory_policy == 'continue' and inventory_qty <= 0:
+                            # "Continue selling when out of stock" usually means Pre-Order
+                            display = clean_title
+                            status = '<span class="status-preorder">Pre-Order</span>'
+                        else:
+                            display = clean_title
+                            status = '<span class="status-available">In Stock</span>'
+                    else:
+                        # Definitely unavailable
                         display = f'<div class="option-unavailable">{clean_title}</div>'
                         status = '<span class="text-unavailable">Out of Stock</span>'
-                    elif "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper():
-                        display = clean_title
-                        status = '<span class="status-preorder">Pre-Order</span>'
-                    else:
-                        display = clean_title
-                        status = '<span class="status-available">In Stock</span>'
-                    
+                    # --- NEW LOGIC END ---
+
                     html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
                 
                 html_output += '</tbody></table>'
-            else:
-                print(f"Failed to load page {model_name}: {response.status_code}")
 
         except Exception as e:
             print(f"Error on {model_name}: {e}")
@@ -95,7 +101,6 @@ def fetch_seat_data():
     
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_output)
-    print("Successfully generated index.html")
 
 if __name__ == "__main__":
     fetch_seat_data()

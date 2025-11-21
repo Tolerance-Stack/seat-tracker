@@ -1,5 +1,5 @@
 import requests
-import os
+import json
 from datetime import datetime
 
 PRODUCTS = {
@@ -10,7 +10,6 @@ PRODUCTS = {
 }
 
 def fetch_seat_data():
-    # We use a placeholder text "DATE_HERE" to avoid conflicts with CSS % symbols
     current_date = datetime.now().strftime("%b %d, %Y")
     
     html = """
@@ -35,32 +34,39 @@ def fetch_seat_data():
       <h3>Scheel-Mann Status <span class="sm-date">Updated: DATE_HERE</span></h3>
     """
     
-    # Swap the placeholder for the real date
     html = html.replace("DATE_HERE", current_date)
 
     for model_name, url in PRODUCTS.items():
         try:
-            print(f"Checking {model_name}...")
+            print(f"--- Checking {model_name} ---")
             response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
             if response.status_code == 200:
                 data = response.json()
                 variants = data.get('product', {}).get('variants', [])
+                
                 html += f'<div class="sm-seat-title">{model_name}</div>'
                 html += '<table class="sm-status-table"><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
+                
                 for variant in variants:
                     raw_title = variant.get('title', '')
+                    # THE DEBUGGER: This prints the raw data to your GitHub logs
+                    print(f"DEBUG: {raw_title} | Available: {variant.get('available')} | Qty: {variant.get('inventory_quantity')}")
+
                     is_available = variant.get('available', False)
                     clean_title = raw_title.split(' - CURRENTLY')[0].strip()
+                    
                     if not is_available:
                         display = f'<div class="option-unavailable">{clean_title}</div>'
-                        status = '<span class="text-unavailable">Sold Out</span>'
+                        status = '<span class="text-unavailable">Out of Stock</span>'
                     elif "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper():
                         display = clean_title
                         status = '<span class="status-preorder">Pre-Order</span>'
                     else:
                         display = clean_title
                         status = '<span class="status-available">In Stock</span>'
+                    
                     html += f'<tr><td>{display}</td><td>{status}</td></tr>'
+                
                 html += '</tbody></table>'
             else:
                 print(f"Failed to fetch {model_name}: {response.status_code}")

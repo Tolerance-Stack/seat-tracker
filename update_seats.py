@@ -2,6 +2,7 @@ import requests
 import json
 from datetime import datetime
 
+# Using the official AJAX feed which drives the "Add to Cart" buttons
 PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f.js",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.js",
@@ -10,40 +11,43 @@ PRODUCTS = {
 }
 
 def fetch_seat_data():
-    current_date = datetime.now().strftime("%b %d, %Y")
+    # Adding specific time to force you to see if the cache updated
+    update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
     html_output = """
     <!DOCTYPE html>
     <html>
     <head>
-    <style>
+    <meta http-equiv="refresh" content="300"> <style>
       body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }
       h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }
       .sm-date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px;}
+      
       .sm-status-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 14px; }
       .sm-seat-title { background-color: #f4f4f4; padding: 8px; margin: 0; border-left: 4px solid #333; font-weight: bold; }
       .sm-status-table th { text-align: left; padding: 8px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em;}
       .sm-status-table td { padding: 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
       
-      /* Status Colors */
+      /* STATUS COLORS */
       .status-available { color: #27ae60; font-weight: bold; font-size: 0.9em; letter-spacing: 0.5px; text-transform: uppercase; }
-      .status-preorder { color: #d35400; font-weight: bold; font-size: 0.9em; letter-spacing: 0.5px; text-transform: uppercase; }
+      .status-preorder { color: #e67e22; font-weight: bold; font-size: 0.9em; letter-spacing: 0.5px; text-transform: uppercase; }
       
-      /* Unavailable / Crossed Out */
+      /* UNAVAILABLE STYLING (Diagonal Line) */
       .option-unavailable { 
         position: relative; 
         display: inline-block; 
         color: #aaa; 
         padding: 0 4px; 
+        /* The diagonal line effect */
         background: linear-gradient(to top left, transparent 46%, #999 49%, #999 51%, transparent 54%); 
       }
       .text-unavailable { color: #ccc; font-style: italic; font-size: 0.9em; }
     </style>
     </head>
     <body>
-      <h3>Scheel-Mann Status <span class="sm-date">Updated: DATE_HERE</span></h3>
+      <h3>Scheel-Mann Status <span class="sm-date">Generated: TIME_STAMP</span></h3>
     """
-    html_output = html_output.replace("DATE_HERE", current_date)
+    html_output = html_output.replace("TIME_STAMP", update_time)
 
     for model_name, url in PRODUCTS.items():
         try:
@@ -60,34 +64,34 @@ def fetch_seat_data():
                 for variant in variants:
                     raw_title = variant.get('title', '')
                     
-                    # 1. CLEAN THE TITLE (Remove "Black / " prefix)
+                    # --- 1. NAME CLEANER ---
+                    # Splits "Black / Black Basketweave" -> "Black Basketweave"
+                    # Splits "Black / Grey Rodeo" -> "Grey Rodeo"
                     if ' / ' in raw_title:
-                        # Splits "Black / Basketweave" and keeps only "Basketweave"
-                        clean_title_text = raw_title.split(' / ')[-1].strip()
+                        clean_title = raw_title.split(' / ')[-1].strip()
                     else:
-                        clean_title_text = raw_title
+                        clean_title = raw_title
                     
-                    # Remove the long "CURRENTLY IN PRODUCTION" text from the NAME column
-                    # (We still use the raw_title to detect the status, but we don't want to display it)
-                    display_name = clean_title_text.split(' - CURRENTLY')[0].strip()
+                    # Remove the "CURRENTLY IN PRODUCTION" junk from the display name
+                    clean_title = clean_title.split(' - CURRENTLY')[0].strip()
 
-                    # 2. DETERMINE STATUS
+                    # --- 2. STATUS LOGIC ---
                     is_available = variant.get('available', False)
-                    is_preorder = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
+                    is_preorder_text = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
 
                     if not is_available:
-                        # If Shopify says it's unavailable, it's Out of Stock
-                        display = f'<div class="option-unavailable">{display_name}</div>'
+                        # CASE 1: Shopify says NO -> Crossed Out
+                        display = f'<div class="option-unavailable">{clean_title}</div>'
                         status = '<span class="text-unavailable">Out of Stock</span>'
                     
-                    elif is_preorder:
-                        # Available = True, but Text says Pre-Order
-                        display = display_name
+                    elif is_preorder_text:
+                        # CASE 2: Shopify says YES, but text says Pre-Order -> Orange
+                        display = clean_title
                         status = '<span class="status-preorder">Pre-Order</span>'
                         
                     else:
-                        # Available = True, and no Pre-Order text
-                        display = display_name
+                        # CASE 3: Shopify says YES, no notes -> Green
+                        display = clean_title
                         status = '<span class="status-available">In Stock</span>'
 
                     html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'

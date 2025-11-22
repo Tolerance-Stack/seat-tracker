@@ -38,11 +38,9 @@ def clean_title(raw_title):
 
 # --- MAIN SCRIPT ---
 def fetch_seat_data():
-    # Browser headers to avoid being blocked
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # Start HTML
     html = """
     <!DOCTYPE html>
     <html>
@@ -74,45 +72,57 @@ def fetch_seat_data():
         try:
             print(f"--- Processing {model} ---")
             
-            # 1. Get Live Status (JS)
+            # 1. LIVE STATUS (Truth Source)
             live_map = {}
             try:
                 js_resp = requests.get(url + ".js", headers=headers)
                 if js_resp.status_code == 200:
                     for v in js_resp.json().get('variants', []):
                         live_map[v['id']] = v.get('available', False)
-            except Exception as e:
-                print(f"JS Warning: {e}")
+            except:
+                pass
 
-            # 2. Get Full List (HTML Deep Scan)
+            # 2. FULL LIST (Smart Hunter)
             variants = []
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    # Regex for product json
-                    m = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', resp.text)
-                    if m:
-                        variants = json.loads(m.group(1)).get('variants', [])
-                    else:
-                        # Fallback Regex
-                        m2 = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', resp.text)
-                        if m2:
-                            variants = json.loads(m2.group(1)).get('product', {}).get('variants', [])
-            except Exception as e:
-                print(f"HTML Warning: {e}")
+                    # Find ALL script tags containing JSON
+                    candidates = re.findall(r'<script[^>]*application/json[^>]*>([\s\S]*?)</script>', resp.text)
+                    
+                    # Also look for the standard Shopify ProductJson tags
+                    candidates += re.findall(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', resp.text)
 
-            # 3. Safety Net: If HTML failed, use JS list
+                    best_candidate = []
+                    for c in candidates:
+                        try:
+                            data = json.loads(c)
+                            # Some JSONs are wrapped in 'product', some are direct
+                            vs = data.get('variants') or data.get('product', {}).get('variants', [])
+                            
+                            # We want the list with the MOST items (The Main Product)
+                            if len(vs) > len(best_candidate):
+                                best_candidate = vs
+                        except:
+                            continue
+                    
+                    variants = best_candidate
+
+            except Exception as e:
+                print(f"HTML Scan Error: {e}")
+
+            # 3. SAFETY FALLBACK
             source_type = "HTML"
             if not variants:
-                print("HTML scan empty. Using JS backup.")
+                print("Using JS Backup")
                 # Re-fetch JS list to use as main list
                 if live_map: 
-                    # Re-request to get full objects, not just map
-                    js_backup = requests.get(url + ".js", headers=headers).json().get('variants', [])
-                    variants = js_backup
-                    source_type = "JS"
+                     # We fetch the JS again to get the full object structure
+                     js_bk = requests.get(url + ".js", headers=headers).json().get('variants', [])
+                     variants = js_bk
+                     source_type = "JS"
 
-            # 4. Build Table
+            # 4. BUILD TABLE
             html += f'<div class="title">{model}</div>'
             html += '<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
             link = SHOP_LINKS.get(model, "#")
@@ -123,11 +133,11 @@ def fetch_seat_data():
                 clean = clean_title(raw)
                 color = get_color_box(clean)
                 
-                # Status Logic
+                # MERGE STATUS LOGIC
                 if vid in live_map:
                     is_avail = live_map[vid]
                 else:
-                    # If using JS source, trust the item. If HTML source, missing means out.
+                    # If using JS source, trust item. If HTML source, missing means out.
                     is_avail = v.get('available', False) if source_type == "JS" else False
 
                 is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()

@@ -1,6 +1,5 @@
 import requests
 import json
-import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
@@ -53,28 +52,4 @@ def fetch_seat_data():
     html_parts.append('.title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }')
     html_parts.append('th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em;}')
     html_parts.append('td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }')
-    html_parts.append('.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; border: 1px solid #ccc; vertical-align: middle; }')
-    html_parts.append('a { text-decoration: none; }')
-    html_parts.append('a:hover { text-decoration: underline; }')
-    html_parts.append('.avail { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
-    html_parts.append('.pre { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
-    html_parts.append('</style></head><body>')
-    
-    # NEW TITLE
-    html_parts.append(f'<h3>Scheel-Mann Vario Seats In Stock in Portland <span class="date">Updated: {update_time}</span></h3>')
-
-    for model, url in PRODUCTS.items():
-        try:
-            print(f"--- Processing {model} ---")
-            resp = requests.get(url, headers=headers)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                variants = data.get('variants', [])
-                
-                # Buffer rows so we only show the table if items exist
-                rows = []
-                link = SHOP_LINKS.get(model, "#")
-
-                for v in variants:
-                    is_avail = v.get('available
+    html_parts.append('.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px;

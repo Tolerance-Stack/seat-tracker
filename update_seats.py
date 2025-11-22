@@ -4,7 +4,8 @@ import re
 from datetime import datetime
 
 # 1. URLs
-URLS = {
+# We need both the HTML URL (for the full list) and the JS URL (for live status)
+PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
     "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
@@ -60,42 +61,46 @@ def fetch_seat_data():
     """
     html_output = html_output.replace("TIME_STAMP", update_time)
 
-    for model_name, url in URLS.items():
+    for model_name, base_url in PRODUCTS.items():
         try:
-            print(f"--- Deep Scanning {model_name} ---")
-            response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+            print(f"--- Processing {model_name} ---")
             
+            # STEP 1: Fetch LIVE status from .js feed (The "Truth")
+            js_url = base_url + ".js"
+            live_inventory = {}
+            try:
+                js_response = requests.get(js_url, headers={'User-Agent': 'Mozilla/5.0'})
+                if js_response.status_code == 200:
+                    js_data = js_response.json()
+                    for v in js_data.get('variants', []):
+                        # We map ID -> Available Status
+                        live_inventory[v['id']] = v.get('available', False)
+            except Exception as e:
+                print(f"JS Fetch Error: {e}")
+
+            # STEP 2: Fetch FULL LIST from HTML (The "Structure")
+            response = requests.get(base_url, headers={'User-Agent': 'Mozilla/5.0'})
             if response.status_code == 200:
-                # STRATEGY 1: STRICT - Look for the main product template ONLY
-                # This avoids grabbing "Related Products" which might be blank
+                # Find the main JSON blob
                 match = re.search(r'id="ProductJson-product-template">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
-                
-                # STRATEGY 2: Relaxed - Look for any ProductJson if strict fails
                 if not match:
-                     print("Strict match failed, trying loose match...")
                      match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
 
                 variants = []
                 if match:
                     json_data = json.loads(match.group(1))
                     variants = json_data.get('variants', [])
-                    # DEBUG PRINT: PROVE WE FOUND DATA
-                    if len(variants) > 0:
-                        print(f"DEBUG: Found {len(variants)} items.")
-                        print(f"DEBUG: Sample Item Keys: {list(variants[0].keys())}")
-                        print(f"DEBUG: Sample Title: {variants[0].get('title')}")
-                else:
-                    print("DEBUG: No JSON found in HTML.")
-
+                
                 html_output += f'<div class="sm-seat-title">{model_name}</div>'
                 html_output += '<table class="sm-status-table"><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
                 target_link = SHOP_LINKS.get(model_name, "#")
 
                 for variant in variants:
-                    # Fallback chain to find ANY name
-                    raw_title = variant.get('title') or variant.get('name') or variant.get('option1') or "Unknown"
+                    # Identify the variant
+                    v_id = variant.get('id')
+                    raw_title = variant.get('title') or variant.get('name') or "Unknown"
                     
-                    # Clean title
+                    # Clean Title
                     if ' / ' in str(raw_title):
                         clean_title = str(raw_title).split(' / ')[-1].strip()
                     else:
@@ -104,9 +109,18 @@ def fetch_seat_data():
                     
                     color_box_html = get_color_box(clean_title)
                     
-                    is_available = variant.get('available', False)
+                    # STEP 3: THE MERGE LOGIC
+                    # Check if this ID exists in the Live Inventory
+                    if v_id in live_inventory:
+                        # It is in the live feed, so we trust the live status
+                        is_available = live_inventory[v_id]
+                    else:
+                        # It is NOT in the live feed, so it must be hidden/sold out
+                        is_available = False
+                    
                     is_preorder = "PRE-ORDER" in str(raw_title).upper() or "PRODUCTION" in str(raw_title).upper()
 
+                    # Display Logic
                     if not is_available:
                         display = f'{color_box_html} <div class="option-unavailable">{clean_title}</div>'
                         status = '<span class="text-unavailable">Out of Stock</span>'

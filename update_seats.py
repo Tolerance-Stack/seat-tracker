@@ -1,13 +1,14 @@
 import requests
 import json
+import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
 PRODUCTS = {
-    "Vario F": "https://scheel-mann.com/products/vario-f.js",
-    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.js",
-    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima.js",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new.js"
+    "Vario F": "https://scheel-mann.com/products/vario-f",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
 }
 
 SHOP_LINKS = {
@@ -29,15 +30,20 @@ def get_color_box(title):
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
 def clean_title(raw_title):
+    # Remove status text from the dropdown name
     t = str(raw_title)
+    t = re.sub(r'\s*-\s*(Sold Out|Unavailable|Pre-Order|In Production).*', '', t, flags=re.IGNORECASE)
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
-    return t.split(' - CURRENTLY')[0].strip()
+    return t.strip()
 
 def fetch_seat_data():
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
+    # HTML HEADER
     html_parts = []
     html_parts.append('<!DOCTYPE html><html><head>')
     html_parts.append('<meta http-equiv="refresh" content="300">')
@@ -54,43 +60,84 @@ def fetch_seat_data():
     html_parts.append('a:hover { text-decoration: underline; }')
     html_parts.append('.avail { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
     html_parts.append('.pre { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
+    html_parts.append('.out-box { position: relative; display: inline-block; color: #666; padding: 0 4px; background: linear-gradient(to top left, transparent 46%, #888 49%, #888 51%, transparent 54%); }')
+    html_parts.append('.out-text { color: #999; font-style: italic; font-size: 0.9em; }')
     html_parts.append('</style></head><body>')
     html_parts.append(f'<h3>Scheel-Mann Status <span class="date">Updated: {update_time}</span></h3>')
 
     for model, url in PRODUCTS.items():
         try:
             print(f"--- Processing {model} ---")
-            resp = requests.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                variants = data.get('variants', [])
-                
-                html_parts.append(f'<div class="title">{model}</div>')
-                html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
-                link = SHOP_LINKS.get(model, "#")
+            
+            # 1. LIVE STATUS (Get the Truth from the AJAX feed)
+            live_map = {}
+            try:
+                js_resp = requests.get(url + ".js", headers=headers)
+                if js_resp.status_code == 200:
+                    for v in js_resp.json().get('variants', []):
+                        live_map[v['id']] = v.get('available', False)
+            except:
+                pass
 
-                for v in variants:
-                    raw = v.get('title') or "Unknown"
-                    clean = clean_title(raw)
-                    color = get_color_box(clean)
+            # 2. FULL LIST (Dropdown Scraping)
+            variants_found = []
+            try:
+                resp = requests.get(url, headers=headers)
+                if resp.status_code == 200:
+                    # Look for <option value="12345">Name</option>
+                    matches = re.findall(r'<option\s+value="(\d+)"[^>]*>(.*?)</option>', resp.text)
                     
-                    is_avail = v.get('available', False)
-                    is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
+                    for vid, raw_name in matches:
+                        raw_name = raw_name.replace('\n', '').strip()
+                        # IMPORTANT: Filter out generic "Select Option" placeholder if it exists
+                        if "Select" not in raw_name:
+                            variants_found.append({'id': int(vid), 'title': raw_name})
+                    
+                    print(f"Dropdown Scan found {len(variants_found)} items")
 
-                    if is_avail:
-                        if is_pre:
-                            disp = f'{color} {clean}'
-                            stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
-                        else:
-                            disp = f'{color} {clean}'
-                            stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
-                        
-                        html_parts.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
+            except Exception as e:
+                print(f"Scan Error: {e}")
+
+            # 3. BUILD TABLE
+            html_parts.append(f'<div class="title">{model}</div>')
+            html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
+            link = SHOP_LINKS.get(model, "#")
+
+            # Fallback if scan fails
+            if not variants_found and live_map:
+                 print("Using Live Map backup")
+                 variants_found = [{'id': k, 'title': 'Option ' + str(k)} for k in live_map.keys()]
+
+            for v in variants_found:
+                vid = v['id']
+                raw = v['title']
+                clean = clean_title(raw)
+                color = get_color_box(clean)
                 
-                html_parts.append('</tbody></table>')
+                # STATUS LOGIC
+                if vid in live_map:
+                    is_avail = live_map[vid]
+                else:
+                    is_avail = False
+
+                is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
+
+                if not is_avail:
+                    disp = f'{color} <div class="out-box">{clean}</div>'
+                    stat = '<span class="out-text">Out of Stock</span>'
+                elif is_pre:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
+                else:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+
+                html_parts.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
+            
+            html_parts.append('</tbody></table>')
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Critical Error: {e}")
             
     html_parts.append('</body></html>')
     

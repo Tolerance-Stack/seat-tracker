@@ -1,32 +1,38 @@
 import requests
+import json
 import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# We map the Product Title in the RSS feed to your Website Link
-# Note: The keys here must match the Titles in the RSS feed (Vario F, Vario F XXL, etc.)
-PRODUCT_MAP = {
-    "Vario F": {
-        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
-        "feed_url": "https://scheel-mann.com/products/vario-f.atom" # The specific product RSS feed
-    },
-    "Vario F XXL": {
-        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
-        "feed_url": "https://scheel-mann.com/products/vario-f-xxl.atom"
-    },
-    "Vario F Klima": {
-        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
-        "feed_url": "https://scheel-mann.com/products/vario-f-klima.atom"
-    },
-    "Vario F XXL Klima - NEW": { # Note: The feed might use the full name "Vario F XXL Klima - NEW"
-        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
-        "feed_url": "https://scheel-mann.com/products/vario-f-xxl-klima-new.atom"
-    }
+PRODUCTS = {
+    "Vario F": "https://scheel-mann.com/products/vario-f",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
+}
+
+SHOP_LINKS = {
+    "Vario F": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
+    "Vario F XXL": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
+    "Vario F Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
+    "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
 }
 
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
-# --- HELPERS ---
+# --- THE MASTER LIST ---
+# Since the website hides sold out items, we hardcode the options we want to track.
+# This guarantees they appear in the table.
+MASTER_VARIANTS = [
+    "Black Basketweave Cloth with Black Leatherette Bolsters",
+    "Black Real Leather",
+    "Grey Basketweave Cloth with Grey Leatherette Bolsters",
+    "Grey Rodeo Plaid Cloth with Black Leatherette Bolsters",
+    "Brown Microweave Cloth with Brown Leatherette Bolsters",
+    "Brown Microweave Cloth with Black Leatherette Bolsters",
+    "Black & Brown / Brown Microweave Cloth with Black Leatherette Bolsters"
+]
+
 def get_color_box(title):
     found_color = "#ccc" 
     if title:
@@ -43,12 +49,9 @@ def clean_title(raw_title):
     return t.split(' - CURRENTLY')[0].strip()
 
 def fetch_seat_data():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # HTML HEADER
     html_parts = []
     html_parts.append('<!DOCTYPE html><html><head>')
     html_parts.append('<meta http-equiv="refresh" content="300">')
@@ -70,76 +73,63 @@ def fetch_seat_data():
     html_parts.append('</style></head><body>')
     html_parts.append(f'<h3>Scheel-Mann Status <span class="date">Updated: {update_time}</span></h3>')
 
-    for name, data in PRODUCT_MAP.items():
+    for model, url in PRODUCTS.items():
         try:
-            print(f"--- Processing {name} via ATOM Feed ---")
+            print(f"--- Processing {model} ---")
             
-            # 1. LIVE STATUS (JS Feed - The Truth for Active Items)
-            # We convert the .atom URL back to .js to check current stock status
-            js_url = data['feed_url'].replace('.atom', '.js')
-            live_map = {}
+            # 1. GET LIVE DATA (The "Truth" about what is active)
+            live_items = []
             try:
-                js_resp = requests.get(js_url, headers=headers)
+                js_resp = requests.get(url + ".js", headers=headers)
                 if js_resp.status_code == 200:
-                    for v in js_resp.json().get('variants', []):
-                        live_map[str(v['id'])] = v.get('available', False)
+                    live_items = js_resp.json().get('variants', [])
             except Exception as e:
                 print(f"JS Error: {e}")
 
-            # 2. FULL LIST (ATOM Feed - The Backdoor)
-            variants_found = []
-            try:
-                # Fetch the RSS/Atom feed for the product
-                atom_resp = requests.get(data['feed_url'], headers=headers)
-                
-                if atom_resp.status_code == 200:
-                    xml_text = atom_resp.text
-                    
-                    # Regex to find <s:variant> blocks
-                    # These blocks contain <s:id> and <s:title>
-                    # We regex strictly because XML parsing can be brittle with namespaces
-                    variant_blocks = re.findall(r'<s:variant>([\s\S]*?)</s:variant>', xml_text)
-                    
-                    for block in variant_blocks:
-                        # Extract ID
-                        id_match = re.search(r'<s:id>(\d+)</s:id>', block)
-                        # Extract Title
-                        title_match = re.search(r'<s:title>([\s\S]*?)</s:title>', block)
-                        
-                        if id_match and title_match:
-                            vid = id_match.group(1)
-                            vtitle = title_match.group(1).replace('<![CDATA[', '').replace(']]>', '')
-                            variants_found.append({'id': vid, 'title': vtitle})
-                    
-                    print(f"Atom Scan found {len(variants_found)} items")
-            except Exception as e:
-                print(f"Atom Error: {e}")
+            # 2. BUILD THE ROW DATA
+            # We start with our Master List of expected seats
+            # We also merge in any new ones found in the live feed that we missed
+            
+            # Normalize names for comparison
+            processed_rows = []
+            
+            # Create a dictionary of live items for fast lookup by cleaned name
+            live_lookup = {}
+            for v in live_items:
+                raw = v.get('title') or "Unknown"
+                # Remove prefixes for matching
+                clean_name = clean_title(raw)
+                live_lookup[clean_name] = v
 
-            # 3. BUILD TABLE
-            display_name = name.replace(" - NEW", "") # Clean up display name
-            html_parts.append(f'<div class="title">{display_name}</div>')
+            # Merge Master List + Live Found List
+            all_variant_names = sorted(list(set(MASTER_VARIANTS + list(live_lookup.keys()))))
+
+            html_parts.append(f'<div class="title">{model}</div>')
             html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
-            link = data['link']
+            link = SHOP_LINKS.get(model, "#")
 
-            if not variants_found:
-                html_parts.append('<tr><td colspan="2">No data found via Atom feed.</td></tr>')
+            for name in all_variant_names:
+                # Clean the name for display
+                clean = clean_title(name)
+                
+                # We filter out some junk combinations if needed
+                if "Default Title" in clean: continue
 
-            for v in variants_found:
-                vid = v['id']
-                raw = v['title']
-                clean = clean_title(raw)
                 color = get_color_box(clean)
                 
-                # HYBRID LOGIC:
-                # If ID is in Live Map -> Use Live Status
-                # If ID is missing from Live Map -> It means it's Sold Out (Hidden)
-                if vid in live_map:
-                    is_avail = live_map[vid]
+                # STATUS CHECK
+                if clean in live_lookup:
+                    # It exists in the live feed!
+                    v = live_lookup[clean]
+                    is_avail = v.get('available', False)
+                    raw_title = v.get('title', '')
+                    is_pre = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
                 else:
+                    # It is NOT in the live feed -> It is definitely Out of Stock
                     is_avail = False
+                    is_pre = False
 
-                is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
-
+                # DISPLAY LOGIC
                 if not is_avail:
                     disp = f'{color} <div class="out-box">{clean}</div>'
                     stat = '<span class="out-text">Out of Stock</span>'
@@ -155,7 +145,7 @@ def fetch_seat_data():
             html_parts.append('</tbody></table>')
 
         except Exception as e:
-            print(f"Critical Error: {e}")
+            print(f"Error: {e}")
             
     html_parts.append('</body></html>')
     

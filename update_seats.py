@@ -1,25 +1,32 @@
 import requests
-import json
 import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
-PRODUCTS = {
-    "Vario F": "https://scheel-mann.com/products/vario-f",
-    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
-    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
-}
-
-SHOP_LINKS = {
-    "Vario F": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
-    "Vario F XXL": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
-    "Vario F Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
-    "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
+# We map the Product Title in the RSS feed to your Website Link
+# Note: The keys here must match the Titles in the RSS feed (Vario F, Vario F XXL, etc.)
+PRODUCT_MAP = {
+    "Vario F": {
+        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
+        "feed_url": "https://scheel-mann.com/products/vario-f.atom" # The specific product RSS feed
+    },
+    "Vario F XXL": {
+        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
+        "feed_url": "https://scheel-mann.com/products/vario-f-xxl.atom"
+    },
+    "Vario F Klima": {
+        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
+        "feed_url": "https://scheel-mann.com/products/vario-f-klima.atom"
+    },
+    "Vario F XXL Klima - NEW": { # Note: The feed might use the full name "Vario F XXL Klima - NEW"
+        "link": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
+        "feed_url": "https://scheel-mann.com/products/vario-f-xxl-klima-new.atom"
+    }
 }
 
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
+# --- HELPERS ---
 def get_color_box(title):
     found_color = "#ccc" 
     if title:
@@ -63,74 +70,73 @@ def fetch_seat_data():
     html_parts.append('</style></head><body>')
     html_parts.append(f'<h3>Scheel-Mann Status <span class="date">Updated: {update_time}</span></h3>')
 
-    for model, url in PRODUCTS.items():
+    for name, data in PRODUCT_MAP.items():
         try:
-            print(f"--- Processing {model} ---")
+            print(f"--- Processing {name} via ATOM Feed ---")
             
-            # 1. LIVE STATUS (The Truth)
+            # 1. LIVE STATUS (JS Feed - The Truth for Active Items)
+            # We convert the .atom URL back to .js to check current stock status
+            js_url = data['feed_url'].replace('.atom', '.js')
             live_map = {}
             try:
-                js_resp = requests.get(url + ".js", headers=headers)
+                js_resp = requests.get(js_url, headers=headers)
                 if js_resp.status_code == 200:
                     for v in js_resp.json().get('variants', []):
-                        live_map[v['id']] = v.get('available', False)
-            except:
-                pass
-
-            # 2. OMNI-SCANNER (The Brute Force HTML Search)
-            variants = []
-            try:
-                resp = requests.get(url, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.text
-                    print(f"HTML Size: {len(text)}")
-
-                    # PATTERN 1: Look for "variants": [...] JSON structure inside scripts
-                    # We capture the entire array content
-                    matches = re.findall(r'"variants":\s*(\[\{.*?\}\])', text)
-                    
-                    best_list = []
-                    for m in matches:
-                        try:
-                            # Try to parse the found JSON string
-                            # We might need to fix trailing commas or quotes sometimes, but try raw first
-                            data = json.loads(m)
-                            if len(data) > len(best_list):
-                                best_list = data
-                        except:
-                            pass
-                    
-                    variants = best_list
-                    print(f"Omni-Scan found {len(variants)} items")
-
+                        live_map[str(v['id'])] = v.get('available', False)
             except Exception as e:
-                print(f"Scan Error: {e}")
+                print(f"JS Error: {e}")
 
-            # 3. BACKUP (JS Feed)
-            source = "HTML"
-            if not variants:
-                print("HTML Scan failed, using JS backup")
-                source = "JS"
-                if live_map:
-                    variants = requests.get(url + ".js", headers=headers).json().get('variants', [])
+            # 2. FULL LIST (ATOM Feed - The Backdoor)
+            variants_found = []
+            try:
+                # Fetch the RSS/Atom feed for the product
+                atom_resp = requests.get(data['feed_url'], headers=headers)
+                
+                if atom_resp.status_code == 200:
+                    xml_text = atom_resp.text
+                    
+                    # Regex to find <s:variant> blocks
+                    # These blocks contain <s:id> and <s:title>
+                    # We regex strictly because XML parsing can be brittle with namespaces
+                    variant_blocks = re.findall(r'<s:variant>([\s\S]*?)</s:variant>', xml_text)
+                    
+                    for block in variant_blocks:
+                        # Extract ID
+                        id_match = re.search(r'<s:id>(\d+)</s:id>', block)
+                        # Extract Title
+                        title_match = re.search(r'<s:title>([\s\S]*?)</s:title>', block)
+                        
+                        if id_match and title_match:
+                            vid = id_match.group(1)
+                            vtitle = title_match.group(1).replace('<![CDATA[', '').replace(']]>', '')
+                            variants_found.append({'id': vid, 'title': vtitle})
+                    
+                    print(f"Atom Scan found {len(variants_found)} items")
+            except Exception as e:
+                print(f"Atom Error: {e}")
 
-            # 4. BUILD TABLE
-            html_parts.append(f'<div class="title">{model}</div>')
+            # 3. BUILD TABLE
+            display_name = name.replace(" - NEW", "") # Clean up display name
+            html_parts.append(f'<div class="title">{display_name}</div>')
             html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
-            link = SHOP_LINKS.get(model, "#")
+            link = data['link']
 
-            for v in variants:
-                vid = v.get('id')
-                raw = v.get('title') or v.get('name') or "Unknown"
+            if not variants_found:
+                html_parts.append('<tr><td colspan="2">No data found via Atom feed.</td></tr>')
+
+            for v in variants_found:
+                vid = v['id']
+                raw = v['title']
                 clean = clean_title(raw)
                 color = get_color_box(clean)
                 
-                # STATUS LOGIC
+                # HYBRID LOGIC:
+                # If ID is in Live Map -> Use Live Status
+                # If ID is missing from Live Map -> It means it's Sold Out (Hidden)
                 if vid in live_map:
                     is_avail = live_map[vid]
                 else:
-                    # If using JS source, trust the item. If HTML source, missing means out.
-                    is_avail = v.get('available', False) if source == "JS" else False
+                    is_avail = False
 
                 is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
 

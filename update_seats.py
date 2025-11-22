@@ -17,10 +17,18 @@ SHOP_LINKS = {
     "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
 }
 
-COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
+# ADDED "Real Leather" to the black color mapping
+COLORS = {
+    "Black": "#000", 
+    "Real Leather": "#000",
+    "Grey": "#666", 
+    "Gray": "#666", 
+    "Brown": "#654321", 
+    "Tan": "#D2B48C"
+}
 
 def get_color_box(title):
-    c = "#ccc" 
+    c = "#ccc" # Default gray
     if title:
         for k, v in COLORS.items():
             if k.upper() in title.upper():
@@ -39,7 +47,7 @@ def fetch_seat_data():
     ua = {'User-Agent': 'Mozilla/5.0'}
     now = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # Start HTML - Using short lines to prevent cut-off errors
+    # Start HTML
     html = ""
     html += '<!DOCTYPE html><html><head>'
     html += '<meta http-equiv="refresh" content="300">'
@@ -56,7 +64,7 @@ def fetch_seat_data():
     html += 'a.pre { color: #e67e22; }'
     html += '</style></head><body>'
     
-    html += f'<h3>In Stock in Portland <span class="date">{now}</span></h3>'
+    html += f'<h3>Scheel-Mann Vario Seats In Stock in Portland <span class="date">{now}</span></h3>'
 
     for model, url in PRODUCTS.items():
         try:

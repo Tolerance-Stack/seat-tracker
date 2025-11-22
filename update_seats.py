@@ -21,15 +21,28 @@ SHOP_LINKS = {
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
 # --- THE MASTER LIST ---
-# These are the exact rows that will appear on your site.
-# The script will try to find a match for these in the live data.
+# This forces these specific rows to appear, even if Scheel-Mann hides them.
+# I have added the standard 14 options found in their catalog.
 MASTER_LIST = [
+    # Standard Options
     "Black Basketweave Cloth with Black Leatherette Bolsters",
     "Black Real Leather",
     "Grey Basketweave Cloth with Grey Leatherette Bolsters",
     "Grey Rodeo Plaid Cloth with Black Leatherette Bolsters",
     "Brown Microweave Cloth with Brown Leatherette Bolsters",
-    "Brown Microweave Cloth with Black Leatherette Bolsters"
+    "Brown Microweave Cloth with Black Leatherette Bolsters",
+    
+    # Additional / Heritage Options
+    "Grey Five Bar Cloth with Black Leatherette Bolsters",
+    "MB Rodeo Grey Cloth with Black Leatherette Bolsters",
+    "Black Cloth with Black Leatherette Bolsters",
+    "Black Corduroy Cloth with Black Leatherette Bolsters",
+    "Black Pepita Cloth with Black Leatherette Bolsters",
+    
+    # Specific Variants sometimes listed differently
+    "Black & Brown / Brown Microweave Cloth with Black Leatherette Bolsters",
+    "Real Leather", 
+    "Black Leatherette"
 ]
 
 def get_color_box(title):
@@ -44,10 +57,8 @@ def get_color_box(title):
 def clean_live_title(raw_title):
     """Cleans the live feed titles so they match our Master List"""
     t = str(raw_title)
-    # Remove prefixes like "Black / "
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
-    # Remove suffixes like " - Sold Out" or " - Pre-Order"
     t = t.split(' - ')[0].strip()
     return t
 
@@ -55,7 +66,6 @@ def fetch_seat_data():
     headers = {'User-Agent': 'Mozilla/5.0'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # HTML HEADER
     html_parts = []
     html_parts.append('<!DOCTYPE html><html><head>')
     html_parts.append('<meta http-equiv="refresh" content="300">')
@@ -82,30 +92,20 @@ def fetch_seat_data():
             print(f"--- Processing {model} ---")
             
             # 1. FETCH LIVE DATA
-            # We download the active list from Scheel-Mann
-            live_data = []
+            live_lookup = {}
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    live_data = resp.json().get('variants', [])
+                    for v in resp.json().get('variants', []):
+                        raw = v.get('title', '')
+                        live_lookup[clean_live_title(raw)] = {
+                            "available": v.get('available', False),
+                            "raw_title": raw
+                        }
             except Exception as e:
                 print(f"Error fetching live data: {e}")
 
-            # 2. CREATE LOOKUP DICTIONARY
-            # This allows us to find a seat by its name instantly
-            # We store TWO things: (Available Status, Full Raw Title for Pre-Order Check)
-            live_lookup = {}
-            for v in live_data:
-                raw_name = v.get('title', '')
-                clean_name = clean_live_title(raw_name)
-                
-                is_avail = v.get('available', False)
-                live_lookup[clean_name] = {
-                    "available": is_avail,
-                    "raw_title": raw_name
-                }
-
-            # 3. BUILD TABLE USING MASTER LIST
+            # 2. BUILD TABLE USING MASTER LIST
             html_parts.append(f'<div class="title">{model}</div>')
             html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
             link = SHOP_LINKS.get(model, "#")
@@ -113,38 +113,31 @@ def fetch_seat_data():
             for expected_name in MASTER_LIST:
                 color = get_color_box(expected_name)
                 
-                # CHECK: Does this expected name exist in the live data?
-                # We use a loose match (if the clean name is inside the expected name)
-                
+                # Match Logic: Loose matching
                 match_found = False
                 is_avail = False
                 is_pre = False
                 
-                # Try to find a match in the live lookup
-                for live_clean_name, data in live_lookup.items():
-                    # We check if the core words match
-                    if live_clean_name in expected_name or expected_name in live_clean_name:
+                for live_clean, data in live_lookup.items():
+                    # Check if expected name is roughly in the live name
+                    if expected_name in live_clean or live_clean in expected_name:
                         match_found = True
                         is_avail = data['available']
-                        raw_title = data['raw_title']
-                        is_pre = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
+                        raw_t = data['raw_title']
+                        is_pre = "PRE-ORDER" in raw_t.upper() or "PRODUCTION" in raw_t.upper()
                         break
                 
-                # DISPLAY LOGIC
+                # Logic: If matched and available -> Green/Orange. Else -> Crossed Out.
                 if not match_found:
-                    # If Scheel-Mann hides it, it's Out of Stock
                     disp = f'{color} <div class="out-box">{expected_name}</div>'
                     stat = '<span class="out-text">Out of Stock</span>'
                 elif not is_avail:
-                    # If Scheel-Mann lists it but says "Available: False"
                     disp = f'{color} <div class="out-box">{expected_name}</div>'
                     stat = '<span class="out-text">Out of Stock</span>'
                 elif is_pre:
-                    # Available + Pre-Order Text
                     disp = f'{color} {expected_name}'
                     stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
                 else:
-                    # Available + No Pre-Order Text
                     disp = f'{color} {expected_name}'
                     stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
 

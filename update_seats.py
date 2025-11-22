@@ -45,8 +45,6 @@ def clean_variant_title(raw_title):
     # 1. Remove 'Black /' style prefixes
     if ' / ' in raw_title:
         parts = raw_title.split(' / ')
-        # If split results in text, take the last part. 
-        # If it's empty, keep original.
         if len(parts) > 1 and parts[-1].strip():
             title = parts[-1].strip()
         else:
@@ -84,7 +82,6 @@ def fetch_seat_data():
       .status-available { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; }
       .status-preorder { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; }
       
-      /* Darkened the grey here so it is more visible */
       .option-unavailable { 
         position: relative; 
         display: inline-block; 
@@ -106,7 +103,7 @@ def fetch_seat_data():
             response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
             
             if response.status_code == 200:
-                # 1. Try finding the main product-template JSON first (Most reliable)
+                # 1. Try finding the main product-template JSON first
                 match = re.search(r'id="ProductJson-product-template">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
                 
                 # 2. If not found, try generic regex
@@ -125,4 +122,40 @@ def fetch_seat_data():
                          variants = json_data.get('product', {}).get('variants', [])
                 
                 html_output += f'<div class="sm-seat-title">{model_name}</div>'
-                html_output += '<table class="sm-status-table"><thead><tr><th width="65%">Option</th><th>Status</th>
+                # This was the line that broke before, it is fixed now:
+                html_output += '<table class="sm-status-table"><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
+                target_link = SHOP_LINKS.get(model_name, "#")
+
+                for variant in variants:
+                    raw_title = variant.get('title') or variant.get('name') or variant.get('public_title') or variant.get('option1') or "Unknown Variant"
+                    
+                    clean_title = clean_variant_title(raw_title)
+                    color_box_html = get_color_box(clean_title)
+                    
+                    is_available = variant.get('available', False)
+                    is_preorder = "PRE-ORDER" in str(raw_title).upper() or "PRODUCTION" in str(raw_title).upper()
+
+                    if not is_available:
+                        display = f'{color_box_html} <div class="option-unavailable">{clean_title}</div>'
+                        status = '<span class="text-unavailable">Out of Stock</span>'
+                    elif is_preorder:
+                        display = f'{color_box_html} {clean_title}'
+                        status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-preorder">Pre-Order</span></a>'
+                    else:
+                        display = f'{color_box_html} {clean_title}'
+                        status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-available">In Stock</span></a>'
+
+                    html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
+                
+                html_output += '</tbody></table>'
+
+        except Exception as e:
+            print(f"Error on {model_name}: {e}")
+            
+    html_output += "</body></html>"
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html_output)
+
+if __name__ == "__main__":
+    fetch_seat_data()

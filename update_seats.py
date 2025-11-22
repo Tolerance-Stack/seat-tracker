@@ -4,7 +4,6 @@ import re
 from datetime import datetime
 
 # 1. URLs
-# We need both the HTML URL (for the full list) and the JS URL (for live status)
 PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
@@ -31,7 +30,19 @@ def get_color_box(title):
                 break
     return f'<span class="color-box" style="background-color: {found_color};"></span>'
 
+def clean_title(raw_title):
+    if ' / ' in str(raw_title):
+        ct = str(raw_title).split(' / ')[-1].strip()
+    else:
+        ct = str(raw_title)
+    return ct.split(' - CURRENTLY')[0].strip()
+
 def fetch_seat_data():
+    # Use a real browser User-Agent to prevent blocking
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
     html_output = """
@@ -65,83 +76,94 @@ def fetch_seat_data():
         try:
             print(f"--- Processing {model_name} ---")
             
-            # STEP 1: Fetch LIVE status from .js feed (The "Truth")
-            js_url = base_url + ".js"
-            live_inventory = {}
+            # 1. Get JS Data (Reliable List & Status)
+            js_variants = []
+            live_inventory = {} # Dictionary to store True/False status by ID
+            
             try:
-                js_response = requests.get(js_url, headers={'User-Agent': 'Mozilla/5.0'})
+                js_url = base_url + ".js"
+                js_response = requests.get(js_url, headers=headers)
                 if js_response.status_code == 200:
                     js_data = js_response.json()
-                    for v in js_data.get('variants', []):
-                        # We map ID -> Available Status
+                    js_variants = js_data.get('variants', [])
+                    for v in js_variants:
                         live_inventory[v['id']] = v.get('available', False)
             except Exception as e:
-                print(f"JS Fetch Error: {e}")
+                print(f"JS Fetch Warning: {e}")
 
-            # STEP 2: Fetch FULL LIST from HTML (The "Structure")
-            response = requests.get(base_url, headers={'User-Agent': 'Mozilla/5.0'})
-            if response.status_code == 200:
-                # Find the main JSON blob
-                match = re.search(r'id="ProductJson-product-template">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
-                if not match:
-                     match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
+            # 2. Get HTML Data (Deep Scan for hidden items)
+            html_variants = []
+            try:
+                response = requests.get(base_url, headers=headers)
+                if response.status_code == 200:
+                    match = re.search(r'id="ProductJson-product-template">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
+                    if not match:
+                         match = re.search(r'id="ProductJson-[^"]*">\s*(\{[\s\S]*?\})\s*<\/script>', response.text)
+                    
+                    if match:
+                        json_data = json.loads(match.group(1))
+                        html_variants = json_data.get('variants', [])
+                    else:
+                        # Fallback to 'var meta' logic
+                        match_meta = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', response.text)
+                        if match_meta:
+                            json_data = json.loads(match_meta.group(1))
+                            html_variants = json_data.get('product', {}).get('variants', [])
+            except Exception as e:
+                print(f"HTML Fetch Warning: {e}")
 
-                variants = []
-                if match:
-                    json_data = json.loads(match.group(1))
-                    variants = json_data.get('variants', [])
+            # 3. SAFETY NET LOGIC
+            # If HTML scan found items, use them (preferred). 
+            # If HTML scan found 0 items (failed), use JS variants (backup).
+            if len(html_variants) > 0:
+                final_list = html_variants
+                source = "HTML (Deep Scan)"
+            else:
+                final_list = js_variants
+                source = "JS (Backup)"
+            
+            print(f"Using source: {source} with {len(final_list)} items")
+
+            # 4. Build Table
+            html_output += f'<div class="sm-seat-title">{model_name}</div>'
+            html_output += '<table class="sm-status-table"><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
+            target_link = SHOP_LINKS.get(model_name, "#")
+
+            for variant in final_list:
+                v_id = variant.get('id')
+                raw_title = variant.get('title') or variant.get('name') or "Unknown"
                 
-                html_output += f'<div class="sm-seat-title">{model_name}</div>'
-                html_output += '<table class="sm-status-table"><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
-                target_link = SHOP_LINKS.get(model_name, "#")
-
-                for variant in variants:
-                    # Identify the variant
-                    v_id = variant.get('id')
-                    raw_title = variant.get('title') or variant.get('name') or "Unknown"
-                    
-                    # Clean Title
-                    if ' / ' in str(raw_title):
-                        clean_title = str(raw_title).split(' / ')[-1].strip()
-                    else:
-                        clean_title = str(raw_title)
-                    clean_title = clean_title.split(' - CURRENTLY')[0].strip()
-                    
-                    color_box_html = get_color_box(clean_title)
-                    
-                    # STEP 3: THE MERGE LOGIC
-                    # Check if this ID exists in the Live Inventory
-                    if v_id in live_inventory:
-                        # It is in the live feed, so we trust the live status
-                        is_available = live_inventory[v_id]
-                    else:
-                        # It is NOT in the live feed, so it must be hidden/sold out
-                        is_available = False
-                    
-                    is_preorder = "PRE-ORDER" in str(raw_title).upper() or "PRODUCTION" in str(raw_title).upper()
-
-                    # Display Logic
-                    if not is_available:
-                        display = f'{color_box_html} <div class="option-unavailable">{clean_title}</div>'
-                        status = '<span class="text-unavailable">Out of Stock</span>'
-                    elif is_preorder:
-                        display = f'{color_box_html} {clean_title}'
-                        status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-preorder">Pre-Order</span></a>'
-                    else:
-                        display = f'{color_box_html} {clean_title}'
-                        status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-available">In Stock</span></a>'
-
-                    html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
+                cleaned_title_text = clean_title(raw_title)
+                color_box_html = get_color_box(cleaned_title_text)
                 
-                html_output += '</tbody></table>'
+                # MERGE STATUS LOGIC
+                # If we have live inventory data for this ID, use it.
+                # If not (e.g. hidden item found in HTML but not JS), assume Unavailable.
+                if v_id in live_inventory:
+                    is_available = live_inventory[v_id]
+                else:
+                    # If we are using JS source, we trust the variant's own 'available' flag
+                    # If we are using HTML source and it's missing from JS, it's unavailable.
+                    if source == "JS (Backup)":
+                         is_available = variant.get('available', False)
+                    else:
+                         is_available = False
+
+                is_preorder = "PRE-ORDER" in str(raw_title).upper() or "PRODUCTION" in str(raw_title).upper()
+
+                if not is_available:
+                    display = f'{color_box_html} <div class="option-unavailable">{cleaned_title_text}</div>'
+                    status = '<span class="text-unavailable">Out of Stock</span>'
+                elif is_preorder:
+                    display = f'{color_box_html} {cleaned_title_text}'
+                    status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-preorder">Pre-Order</span></a>'
+                else:
+                    display = f'{color_box_html} {cleaned_title_text}'
+                    status = f'<a href="{target_link}" target="_parent" class="status-link"><span class="status-available">In Stock</span></a>'
+
+                html_output += f'<tr><td>{display}</td><td>{status}</td></tr>'
+            
+            html_output += '</tbody></table>'
 
         except Exception as e:
-            print(f"Error on {model_name}: {e}")
-            
-    html_output += "</body></html>"
-    
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html_output)
-
-if __name__ == "__main__":
-    fetch_seat_data()
+            print(f"

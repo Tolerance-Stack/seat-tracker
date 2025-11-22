@@ -5,10 +5,10 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 PRODUCTS = {
-    "Vario F": "https://scheel-mann.com/products/vario-f",
-    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
-    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
+    "Vario F": "https://scheel-mann.com/products/vario-f.js",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.js",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima.js",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new.js"
 }
 
 SHOP_LINKS = {
@@ -20,6 +20,18 @@ SHOP_LINKS = {
 
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
+# --- THE MASTER LIST ---
+# These are the exact rows that will appear on your site.
+# The script will try to find a match for these in the live data.
+MASTER_LIST = [
+    "Black Basketweave Cloth with Black Leatherette Bolsters",
+    "Black Real Leather",
+    "Grey Basketweave Cloth with Grey Leatherette Bolsters",
+    "Grey Rodeo Plaid Cloth with Black Leatherette Bolsters",
+    "Brown Microweave Cloth with Brown Leatherette Bolsters",
+    "Brown Microweave Cloth with Black Leatherette Bolsters"
+]
+
 def get_color_box(title):
     found_color = "#ccc" 
     if title:
@@ -29,18 +41,18 @@ def get_color_box(title):
                 break
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
-def clean_title(raw_title):
-    # Remove status text from the dropdown name
+def clean_live_title(raw_title):
+    """Cleans the live feed titles so they match our Master List"""
     t = str(raw_title)
-    t = re.sub(r'\s*-\s*(Sold Out|Unavailable|Pre-Order|In Production).*', '', t, flags=re.IGNORECASE)
+    # Remove prefixes like "Black / "
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
-    return t.strip()
+    # Remove suffixes like " - Sold Out" or " - Pre-Order"
+    t = t.split(' - ')[0].strip()
+    return t
 
 def fetch_seat_data():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
     # HTML HEADER
@@ -69,67 +81,71 @@ def fetch_seat_data():
         try:
             print(f"--- Processing {model} ---")
             
-            # 1. LIVE STATUS (Get the Truth from the AJAX feed)
-            live_map = {}
-            try:
-                js_resp = requests.get(url + ".js", headers=headers)
-                if js_resp.status_code == 200:
-                    for v in js_resp.json().get('variants', []):
-                        live_map[v['id']] = v.get('available', False)
-            except:
-                pass
-
-            # 2. FULL LIST (Dropdown Scraping)
-            variants_found = []
+            # 1. FETCH LIVE DATA
+            # We download the active list from Scheel-Mann
+            live_data = []
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    # Look for <option value="12345">Name</option>
-                    matches = re.findall(r'<option\s+value="(\d+)"[^>]*>(.*?)</option>', resp.text)
-                    
-                    for vid, raw_name in matches:
-                        raw_name = raw_name.replace('\n', '').strip()
-                        # IMPORTANT: Filter out generic "Select Option" placeholder if it exists
-                        if "Select" not in raw_name:
-                            variants_found.append({'id': int(vid), 'title': raw_name})
-                    
-                    print(f"Dropdown Scan found {len(variants_found)} items")
-
+                    live_data = resp.json().get('variants', [])
             except Exception as e:
-                print(f"Scan Error: {e}")
+                print(f"Error fetching live data: {e}")
 
-            # 3. BUILD TABLE
+            # 2. CREATE LOOKUP DICTIONARY
+            # This allows us to find a seat by its name instantly
+            # We store TWO things: (Available Status, Full Raw Title for Pre-Order Check)
+            live_lookup = {}
+            for v in live_data:
+                raw_name = v.get('title', '')
+                clean_name = clean_live_title(raw_name)
+                
+                is_avail = v.get('available', False)
+                live_lookup[clean_name] = {
+                    "available": is_avail,
+                    "raw_title": raw_name
+                }
+
+            # 3. BUILD TABLE USING MASTER LIST
             html_parts.append(f'<div class="title">{model}</div>')
             html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
             link = SHOP_LINKS.get(model, "#")
 
-            # Fallback if scan fails
-            if not variants_found and live_map:
-                 print("Using Live Map backup")
-                 variants_found = [{'id': k, 'title': 'Option ' + str(k)} for k in live_map.keys()]
-
-            for v in variants_found:
-                vid = v['id']
-                raw = v['title']
-                clean = clean_title(raw)
-                color = get_color_box(clean)
+            for expected_name in MASTER_LIST:
+                color = get_color_box(expected_name)
                 
-                # STATUS LOGIC
-                if vid in live_map:
-                    is_avail = live_map[vid]
-                else:
-                    is_avail = False
-
-                is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
-
-                if not is_avail:
-                    disp = f'{color} <div class="out-box">{clean}</div>'
+                # CHECK: Does this expected name exist in the live data?
+                # We use a loose match (if the clean name is inside the expected name)
+                
+                match_found = False
+                is_avail = False
+                is_pre = False
+                
+                # Try to find a match in the live lookup
+                for live_clean_name, data in live_lookup.items():
+                    # We check if the core words match
+                    if live_clean_name in expected_name or expected_name in live_clean_name:
+                        match_found = True
+                        is_avail = data['available']
+                        raw_title = data['raw_title']
+                        is_pre = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
+                        break
+                
+                # DISPLAY LOGIC
+                if not match_found:
+                    # If Scheel-Mann hides it, it's Out of Stock
+                    disp = f'{color} <div class="out-box">{expected_name}</div>'
+                    stat = '<span class="out-text">Out of Stock</span>'
+                elif not is_avail:
+                    # If Scheel-Mann lists it but says "Available: False"
+                    disp = f'{color} <div class="out-box">{expected_name}</div>'
                     stat = '<span class="out-text">Out of Stock</span>'
                 elif is_pre:
-                    disp = f'{color} {clean}'
+                    # Available + Pre-Order Text
+                    disp = f'{color} {expected_name}'
                     stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
                 else:
-                    disp = f'{color} {clean}'
+                    # Available + No Pre-Order Text
+                    disp = f'{color} {expected_name}'
                     stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
 
                 html_parts.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')

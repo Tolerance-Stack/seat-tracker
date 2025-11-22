@@ -63,7 +63,7 @@ def fetch_seat_data():
     html_parts.append('.out-box { position: relative; display: inline-block; color: #666; padding: 0 4px; background: linear-gradient(to top left, transparent 46%, #888 49%, #888 51%, transparent 54%); }')
     html_parts.append('.out-text { color: #999; font-style: italic; font-size: 0.9em; }')
     html_parts.append('</style></head><body>')
-    html_parts.append(f'<h3>Scheel-Mann Status <span class="date">Updated: {update_time}</span></h3>')
+    html_parts.append(f'<h3>Scheel-Mann Vario In-Stock Status <span class="date">Updated: {update_time}</span></h3>')
 
     for model, url in PRODUCTS.items():
         try:

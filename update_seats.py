@@ -39,21 +39,56 @@ def fetch_seat_data():
     headers = {'User-Agent': 'Mozilla/5.0'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # --- HTML HEADER (Safe Block String) ---
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta http-equiv="refresh" content="300">
-    <style>
-      body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }
-      h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }
-      .date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
-      .title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }
-      th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em; }
-      td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
-      .box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; border: 1px solid #ccc; vertical-align: middle; }
-      a { text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .avail { color: #27ae60; font-
+    # --- HTML HEADER (Built line-by-line to prevent errors) ---
+    h = []
+    h.append('<!DOCTYPE html><html><head>')
+    h.append('<meta http-equiv="refresh" content="300">')
+    h.append('<style>')
+    h.append('body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }')
+    h.append('h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }')
+    h.append('.date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px; }')
+    h.append('table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }')
+    h.append('.title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }')
+    h.append('th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em; }')
+    h.append('td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }')
+    h.append('.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; border: 1px solid #ccc; vertical-align: middle; }')
+    h.append('a { text-decoration: none; }')
+    h.append('a:hover { text-decoration: underline; }')
+    h.append('.avail { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
+    h.append('.pre { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
+    h.append('</style></head><body>')
+    
+    h.append(f'<h3>Scheel-Mann Vario Seats In Stock in Portland <span class="date">Updated: {update_time}</span></h3>')
+
+    for model, url in PRODUCTS.items():
+        try:
+            print(f"--- Processing {model} ---")
+            resp = requests.get(url, headers=headers)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                variants = data.get('variants', [])
+                
+                rows = []
+                link = SHOP_LINKS.get(model, "#")
+
+                for v in variants:
+                    # ONLY SHOW IF AVAILABLE
+                    if v.get('available', False):
+                        raw = v.get('title') or "Unknown"
+                        clean = clean_title(raw)
+                        color = get_color_box(clean)
+                        
+                        is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
+
+                        if is_pre:
+                            disp = f'{color} {clean}'
+                            stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
+                        else:
+                            disp = f'{color} {clean}'
+                            stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+                        
+                        rows.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
+
+                if rows:
+                    h.append(f'<div

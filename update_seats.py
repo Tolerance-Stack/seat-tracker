@@ -20,31 +20,6 @@ SHOP_LINKS = {
 
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
-# --- THE MASTER LIST ---
-# This forces these specific rows to appear, even if Scheel-Mann hides them.
-# I have added the standard 14 options found in their catalog.
-MASTER_LIST = [
-    # Standard Options
-    "Black Basketweave Cloth with Black Leatherette Bolsters",
-    "Black Real Leather",
-    "Grey Basketweave Cloth with Grey Leatherette Bolsters",
-    "Grey Rodeo Plaid Cloth with Black Leatherette Bolsters",
-    "Brown Microweave Cloth with Brown Leatherette Bolsters",
-    "Brown Microweave Cloth with Black Leatherette Bolsters",
-    
-    # Additional / Heritage Options
-    "Grey Five Bar Cloth with Black Leatherette Bolsters",
-    "MB Rodeo Grey Cloth with Black Leatherette Bolsters",
-    "Black Cloth with Black Leatherette Bolsters",
-    "Black Corduroy Cloth with Black Leatherette Bolsters",
-    "Black Pepita Cloth with Black Leatherette Bolsters",
-    
-    # Specific Variants sometimes listed differently
-    "Black & Brown / Brown Microweave Cloth with Black Leatherette Bolsters",
-    "Real Leather", 
-    "Black Leatherette"
-]
-
 def get_color_box(title):
     found_color = "#ccc" 
     if title:
@@ -54,11 +29,12 @@ def get_color_box(title):
                 break
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
-def clean_live_title(raw_title):
-    """Cleans the live feed titles so they match our Master List"""
+def clean_title(raw_title):
+    # Remove " / " prefix (e.g. "Black / Black Basketweave")
     t = str(raw_title)
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
+    # Remove status text like " - CURRENTLY IN PRODUCTION"
     t = t.split(' - ')[0].strip()
     return t
 
@@ -82,76 +58,23 @@ def fetch_seat_data():
     html_parts.append('a:hover { text-decoration: underline; }')
     html_parts.append('.avail { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
     html_parts.append('.pre { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
-    html_parts.append('.out-box { position: relative; display: inline-block; color: #666; padding: 0 4px; background: linear-gradient(to top left, transparent 46%, #888 49%, #888 51%, transparent 54%); }')
-    html_parts.append('.out-text { color: #999; font-style: italic; font-size: 0.9em; }')
     html_parts.append('</style></head><body>')
-    html_parts.append(f'<h3>Scheel-Mann Status <span class="date">Updated: {update_time}</span></h3>')
+    
+    # NEW TITLE
+    html_parts.append(f'<h3>Scheel-Mann Vario Seats In Stock in Portland <span class="date">Updated: {update_time}</span></h3>')
 
     for model, url in PRODUCTS.items():
         try:
             print(f"--- Processing {model} ---")
+            resp = requests.get(url, headers=headers)
             
-            # 1. FETCH LIVE DATA
-            live_lookup = {}
-            try:
-                resp = requests.get(url, headers=headers)
-                if resp.status_code == 200:
-                    for v in resp.json().get('variants', []):
-                        raw = v.get('title', '')
-                        live_lookup[clean_live_title(raw)] = {
-                            "available": v.get('available', False),
-                            "raw_title": raw
-                        }
-            except Exception as e:
-                print(f"Error fetching live data: {e}")
-
-            # 2. BUILD TABLE USING MASTER LIST
-            html_parts.append(f'<div class="title">{model}</div>')
-            html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
-            link = SHOP_LINKS.get(model, "#")
-
-            for expected_name in MASTER_LIST:
-                color = get_color_box(expected_name)
+            if resp.status_code == 200:
+                data = resp.json()
+                variants = data.get('variants', [])
                 
-                # Match Logic: Loose matching
-                match_found = False
-                is_avail = False
-                is_pre = False
-                
-                for live_clean, data in live_lookup.items():
-                    # Check if expected name is roughly in the live name
-                    if expected_name in live_clean or live_clean in expected_name:
-                        match_found = True
-                        is_avail = data['available']
-                        raw_t = data['raw_title']
-                        is_pre = "PRE-ORDER" in raw_t.upper() or "PRODUCTION" in raw_t.upper()
-                        break
-                
-                # Logic: If matched and available -> Green/Orange. Else -> Crossed Out.
-                if not match_found:
-                    disp = f'{color} <div class="out-box">{expected_name}</div>'
-                    stat = '<span class="out-text">Out of Stock</span>'
-                elif not is_avail:
-                    disp = f'{color} <div class="out-box">{expected_name}</div>'
-                    stat = '<span class="out-text">Out of Stock</span>'
-                elif is_pre:
-                    disp = f'{color} {expected_name}'
-                    stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
-                else:
-                    disp = f'{color} {expected_name}'
-                    stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+                # Buffer rows so we only show the table if items exist
+                rows = []
+                link = SHOP_LINKS.get(model, "#")
 
-                html_parts.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
-            
-            html_parts.append('</tbody></table>')
-
-        except Exception as e:
-            print(f"Critical Error: {e}")
-            
-    html_parts.append('</body></html>')
-    
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write("".join(html_parts))
-
-if __name__ == "__main__":
-    fetch_seat_data()
+                for v in variants:
+                    is_avail = v.get('available

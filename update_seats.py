@@ -20,75 +20,87 @@ SHOP_LINKS = {
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
 
 def get_color_box(title):
-    found_color = "#ccc" 
+    c = "#ccc" 
     if title:
-        for color_name, hex_code in COLORS.items():
-            if color_name.upper() in title.upper():
-                found_color = hex_code
+        for k, v in COLORS.items():
+            if k.upper() in title.upper():
+                c = v
                 break
-    return f'<span class="box" style="background-color: {found_color};"></span>'
+    return f'<span class="box" style="background-color: {c};"></span>'
 
-def clean_title(raw_title):
-    t = str(raw_title)
+def clean_title(raw):
+    t = str(raw)
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
     t = t.split(' - ')[0].strip()
     return t
 
 def fetch_seat_data():
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    update_time = datetime.now().strftime("%b %d at %H:%M UTC")
+    ua = {'User-Agent': 'Mozilla/5.0'}
+    now = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # --- HTML HEADER (Built line-by-line to prevent errors) ---
-    h = []
-    h.append('<!DOCTYPE html><html><head>')
-    h.append('<meta http-equiv="refresh" content="300">')
-    h.append('<style>')
-    h.append('body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }')
-    h.append('h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }')
-    h.append('.date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px; }')
-    h.append('table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }')
-    h.append('.title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }')
-    h.append('th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em; }')
-    h.append('td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }')
-    h.append('.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; border: 1px solid #ccc; vertical-align: middle; }')
-    h.append('a { text-decoration: none; }')
-    h.append('a:hover { text-decoration: underline; }')
-    h.append('.avail { color: #27ae60; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
-    h.append('.pre { color: #e67e22; font-weight: bold; font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }')
-    h.append('</style></head><body>')
+    # Start HTML - Using short lines to prevent cut-off errors
+    html = ""
+    html += '<!DOCTYPE html><html><head>'
+    html += '<meta http-equiv="refresh" content="300">'
+    html += '<style>'
+    html += 'body { font-family: sans-serif; padding: 10px; }'
+    html += 'h3 { border-bottom: 2px solid #333; padding-bottom: 10px; }'
+    html += '.date { font-size: 0.8em; color: #666; float: right; }'
+    html += 'table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }'
+    html += '.title { background: #f4f4f4; padding: 10px; font-weight: bold; }'
+    html += 'th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; }'
+    html += 'td { padding: 10px; border-bottom: 1px solid #eee; }'
+    html += '.box { display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 1px solid #ccc; }'
+    html += 'a { text-decoration: none; color: #27ae60; font-weight: bold; }'
+    html += 'a.pre { color: #e67e22; }'
+    html += '</style></head><body>'
     
-    h.append(f'<h3>Scheel-Mann Vario Seats In Stock in Portland <span class="date">Updated: {update_time}</span></h3>')
+    html += f'<h3>In Stock in Portland <span class="date">{now}</span></h3>'
 
     for model, url in PRODUCTS.items():
         try:
-            print(f"--- Processing {model} ---")
-            resp = requests.get(url, headers=headers)
+            print(f"Checking {model}...")
+            resp = requests.get(url, headers=ua)
             
             if resp.status_code == 200:
                 data = resp.json()
                 variants = data.get('variants', [])
                 
-                rows = []
+                rows = ""
                 link = SHOP_LINKS.get(model, "#")
 
                 for v in variants:
-                    # ONLY SHOW IF AVAILABLE
                     if v.get('available', False):
                         raw = v.get('title') or "Unknown"
                         clean = clean_title(raw)
-                        color = get_color_box(clean)
+                        box = get_color_box(clean)
                         
-                        is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
-
+                        is_pre = "PRE-ORDER" in str(raw).upper()
+                        
+                        # Build row parts separately
+                        row_start = "<tr><td>" + box + " " + clean + "</td>"
+                        
                         if is_pre:
-                            disp = f'{color} {clean}'
-                            stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
+                            status = f'<td><a href="{link}" target="_parent" class="pre">Pre-Order</a></td></tr>'
                         else:
-                            disp = f'{color} {clean}'
-                            stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+                            status = f'<td><a href="{link}" target="_parent">In Stock</a></td></tr>'
                         
-                        rows.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
+                        rows += row_start + status
 
                 if rows:
-                    h.append(f'<div
+                    html += f'<div class="title">{model}</div>'
+                    html += '<table><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>'
+                    html += rows
+                    html += '</tbody></table>'
+
+        except Exception as e:
+            print(f"Error: {e}")
+            
+    html += '</body></html>'
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+if __name__ == "__main__":
+    fetch_seat_data()

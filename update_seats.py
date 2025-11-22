@@ -30,7 +30,7 @@ def get_color_box(title):
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
 def clean_title(raw_title):
-    # Remove " - Sold Out", " - Pre-Order", " - Unavailable" from the dropdown text
+    # Remove status text from the dropdown name
     t = str(raw_title)
     t = re.sub(r'\s*-\s*(Sold Out|Unavailable|Pre-Order|In Production).*', '', t, flags=re.IGNORECASE)
     if ' / ' in t:
@@ -75,4 +75,74 @@ def fetch_seat_data():
                 js_resp = requests.get(url + ".js", headers=headers)
                 if js_resp.status_code == 200:
                     for v in js_resp.json().get('variants', []):
-                        live_map[v['id
+                        live_map[v['id']] = v.get('available', False)
+            except:
+                pass
+
+            # 2. FULL LIST (Dropdown Scraping)
+            variants_found = []
+            try:
+                resp = requests.get(url, headers=headers)
+                if resp.status_code == 200:
+                    # Look for <option value="12345">Name</option>
+                    matches = re.findall(r'<option\s+value="(\d+)"[^>]*>(.*?)</option>', resp.text)
+                    
+                    for vid, raw_name in matches:
+                        raw_name = raw_name.replace('\n', '').strip()
+                        # IMPORTANT: Filter out generic "Select Option" placeholder if it exists
+                        if "Select" not in raw_name:
+                            variants_found.append({'id': int(vid), 'title': raw_name})
+                    
+                    print(f"Dropdown Scan found {len(variants_found)} items")
+
+            except Exception as e:
+                print(f"Scan Error: {e}")
+
+            # 3. BUILD TABLE
+            html_parts.append(f'<div class="title">{model}</div>')
+            html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
+            link = SHOP_LINKS.get(model, "#")
+
+            # Fallback if scan fails
+            if not variants_found and live_map:
+                 print("Using Live Map backup")
+                 variants_found = [{'id': k, 'title': 'Option ' + str(k)} for k in live_map.keys()]
+
+            for v in variants_found:
+                vid = v['id']
+                raw = v['title']
+                clean = clean_title(raw)
+                color = get_color_box(clean)
+                
+                # STATUS LOGIC
+                if vid in live_map:
+                    is_avail = live_map[vid]
+                else:
+                    is_avail = False
+
+                is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
+
+                if not is_avail:
+                    disp = f'{color} <div class="out-box">{clean}</div>'
+                    stat = '<span class="out-text">Out of Stock</span>'
+                elif is_pre:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
+                else:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+
+                html_parts.append(f'<tr><td>{disp}</td><td>{stat}</td></tr>')
+            
+            html_parts.append('</tbody></table>')
+
+        except Exception as e:
+            print(f"Critical Error: {e}")
+            
+    html_parts.append('</body></html>')
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write("".join(html_parts))
+
+if __name__ == "__main__":
+    fetch_seat_data()

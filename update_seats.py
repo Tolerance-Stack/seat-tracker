@@ -29,11 +29,9 @@ def get_color_box(title):
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
 def clean_title(raw_title):
-    # Remove " / " prefix (e.g. "Black / Black Basketweave")
     t = str(raw_title)
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
-    # Remove status text like " - CURRENTLY IN PRODUCTION"
     t = t.split(' - ')[0].strip()
     return t
 
@@ -41,15 +39,21 @@ def fetch_seat_data():
     headers = {'User-Agent': 'Mozilla/5.0'}
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    html_parts = []
-    html_parts.append('<!DOCTYPE html><html><head>')
-    html_parts.append('<meta http-equiv="refresh" content="300">')
-    html_parts.append('<style>')
-    html_parts.append('body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }')
-    html_parts.append('h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }')
-    html_parts.append('.date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px;}')
-    html_parts.append('table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }')
-    html_parts.append('.title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }')
-    html_parts.append('th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em;}')
-    html_parts.append('td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }')
-    html_parts.append('.box { display: inline-block; width: 12px; height: 12px; border-radius: 2px;
+    # --- HTML HEADER (Safe Block String) ---
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta http-equiv="refresh" content="300">
+    <style>
+      body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 10px; background: #fff; }
+      h3 { border-bottom: 2px solid #333; padding-bottom: 10px; margin-top: 0; }
+      .date { font-size: 0.8em; color: #666; float: right; font-weight: normal; margin-top: 5px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
+      .title { background-color: #f4f4f4; padding: 10px; margin: 0; border-left: 5px solid #333; font-weight: bold; font-size: 1.1em; }
+      th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; color: #555; font-size: 0.9em; }
+      td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
+      .box { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; border: 1px solid #ccc; vertical-align: middle; }
+      a { text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .avail { color: #27ae60; font-

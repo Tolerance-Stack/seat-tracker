@@ -30,12 +30,10 @@ def get_color_box(title):
     return f'<span class="box" style="background-color: {found_color};"></span>'
 
 def clean_title(raw_title):
-    # Remove status text from the dropdown name
     t = str(raw_title)
-    t = re.sub(r'\s*-\s*(Sold Out|Unavailable|Pre-Order|In Production).*', '', t, flags=re.IGNORECASE)
     if ' / ' in t:
         t = t.split(' / ')[-1].strip()
-    return t.strip()
+    return t.split(' - CURRENTLY')[0].strip()
 
 def fetch_seat_data():
     headers = {
@@ -69,7 +67,7 @@ def fetch_seat_data():
         try:
             print(f"--- Processing {model} ---")
             
-            # 1. LIVE STATUS (Get the Truth from the AJAX feed)
+            # 1. LIVE STATUS (The Truth)
             live_map = {}
             try:
                 js_resp = requests.get(url + ".js", headers=headers)
@@ -79,38 +77,51 @@ def fetch_seat_data():
             except:
                 pass
 
-            # 2. FULL LIST (Dropdown Scraping)
-            variants_found = []
+            # 2. OMNI-SCANNER (The Brute Force HTML Search)
+            variants = []
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    # Look for <option value="12345">Name</option>
-                    matches = re.findall(r'<option\s+value="(\d+)"[^>]*>(.*?)</option>', resp.text)
+                    text = resp.text
+                    print(f"HTML Size: {len(text)}")
+
+                    # PATTERN 1: Look for "variants": [...] JSON structure inside scripts
+                    # We capture the entire array content
+                    matches = re.findall(r'"variants":\s*(\[\{.*?\}\])', text)
                     
-                    for vid, raw_name in matches:
-                        raw_name = raw_name.replace('\n', '').strip()
-                        # IMPORTANT: Filter out generic "Select Option" placeholder if it exists
-                        if "Select" not in raw_name:
-                            variants_found.append({'id': int(vid), 'title': raw_name})
+                    best_list = []
+                    for m in matches:
+                        try:
+                            # Try to parse the found JSON string
+                            # We might need to fix trailing commas or quotes sometimes, but try raw first
+                            data = json.loads(m)
+                            if len(data) > len(best_list):
+                                best_list = data
+                        except:
+                            pass
                     
-                    print(f"Dropdown Scan found {len(variants_found)} items")
+                    variants = best_list
+                    print(f"Omni-Scan found {len(variants)} items")
 
             except Exception as e:
                 print(f"Scan Error: {e}")
 
-            # 3. BUILD TABLE
+            # 3. BACKUP (JS Feed)
+            source = "HTML"
+            if not variants:
+                print("HTML Scan failed, using JS backup")
+                source = "JS"
+                if live_map:
+                    variants = requests.get(url + ".js", headers=headers).json().get('variants', [])
+
+            # 4. BUILD TABLE
             html_parts.append(f'<div class="title">{model}</div>')
             html_parts.append('<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>')
             link = SHOP_LINKS.get(model, "#")
 
-            # Fallback if scan fails
-            if not variants_found and live_map:
-                 print("Using Live Map backup")
-                 variants_found = [{'id': k, 'title': 'Option ' + str(k)} for k in live_map.keys()]
-
-            for v in variants_found:
-                vid = v['id']
-                raw = v['title']
+            for v in variants:
+                vid = v.get('id')
+                raw = v.get('title') or v.get('name') or "Unknown"
                 clean = clean_title(raw)
                 color = get_color_box(clean)
                 
@@ -118,7 +129,8 @@ def fetch_seat_data():
                 if vid in live_map:
                     is_avail = live_map[vid]
                 else:
-                    is_avail = False
+                    # If using JS source, trust the item. If HTML source, missing means out.
+                    is_avail = v.get('available', False) if source == "JS" else False
 
                 is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
 

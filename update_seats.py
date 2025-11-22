@@ -1,22 +1,21 @@
 import requests
 import json
+import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# We map the "Handle" (the last part of the URL) to the Display Name
-HANDLE_MAP = {
-    "vario-f": "Vario F",
-    "vario-f-xxl": "Vario F XXL",
-    "vario-f-klima": "Vario F Klima",
-    "vario-f-xxl-klima-new": "Vario F XXL Klima"
+PRODUCTS = {
+    "Vario F": "https://scheel-mann.com/products/vario-f",
+    "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl",
+    "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima",
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new"
 }
 
-# Map Handles to YOUR shop links
 SHOP_LINKS = {
-    "vario-f": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
-    "vario-f-xxl": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
-    "vario-f-klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
-    "vario-f-xxl-klima-new": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
+    "Vario F": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
+    "Vario F XXL": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
+    "Vario F Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
+    "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
 }
 
 COLORS = {"Black": "#000", "Grey": "#666", "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"}
@@ -38,9 +37,17 @@ def clean_title(raw_title):
     return t.split(' - CURRENTLY')[0].strip()
 
 def fetch_seat_data():
+    # STEALTH HEADERS: Mimic a real Chrome Browser to see the full HTML
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
+    
     update_time = datetime.now().strftime("%b %d at %H:%M UTC")
     
-    # Start HTML
     html = """
     <!DOCTYPE html>
     <html>
@@ -64,3 +71,113 @@ def fetch_seat_data():
     </style>
     </head>
     <body>
+      <h3>Scheel-Mann Status <span class="date">Updated: TIME_STAMP</span></h3>
+    """
+    html = html.replace("TIME_STAMP", update_time)
+
+    for model, url in PRODUCTS.items():
+        try:
+            print(f"--- Processing {model} ---")
+            
+            # 1. LIVE STATUS (Get the Truth from the AJAX feed)
+            live_map = {}
+            try:
+                js_resp = requests.get(url + ".js", headers=headers)
+                if js_resp.status_code == 200:
+                    for v in js_resp.json().get('variants', []):
+                        live_map[v['id']] = v.get('available', False)
+            except Exception as e:
+                print(f"JS Warning: {e}")
+
+            # 2. FULL LIST (Brute Force HTML Scan)
+            variants = []
+            try:
+                resp = requests.get(url, headers=headers)
+                if resp.status_code == 200:
+                    print(f"HTML Fetched. Size: {len(resp.text)} chars")
+                    
+                    # HUNTING STRATEGY: Find ALL JSON blobs in the page
+                    # Look for anything that starts with { and contains "variants": [
+                    candidates = re.findall(r'(\{.*?\"variants\":\s*\[.*?\]\s*.*?\})\s*</script>', resp.text, re.DOTALL)
+                    
+                    # Also try the standard 'var meta =' pattern
+                    meta_match = re.search(r'var meta = (\{[\s\S]*?"variants":[\s\S]*?\});', resp.text)
+                    if meta_match:
+                        candidates.append(meta_match.group(1))
+
+                    # Parse all candidates and find the one with the MOST variants
+                    max_variants = 0
+                    for c in candidates:
+                        try:
+                            data = json.loads(c)
+                            # Handle different JSON structures
+                            vs = data.get('variants') or data.get('product', {}).get('variants', [])
+                            if vs and len(vs) > max_variants:
+                                variants = vs
+                                max_variants = len(vs)
+                        except:
+                            continue
+                    
+                    print(f"Best Candidate has {len(variants)} variants")
+
+            except Exception as e:
+                print(f"HTML Scan Error: {e}")
+
+            # 3. FALLBACK: If HTML failed completely, use the JS list
+            source_type = "HTML"
+            if not variants:
+                print("Using JS Backup (Missing Sold Out items)")
+                if live_map: 
+                     # Re-fetch JS list structure
+                     variants = requests.get(url + ".js", headers=headers).json().get('variants', [])
+                     source_type = "JS"
+
+            # 4. BUILD TABLE
+            html += f'<div class="title">{model}</div>'
+            html += '<table><thead><tr><th width="65%">Option</th><th>Status</th></tr></thead><tbody>'
+            link = SHOP_LINKS.get(model, "#")
+
+            for v in variants:
+                vid = v.get('id')
+                raw = v.get('title') or v.get('name') or "Unknown"
+                clean = clean_title(raw)
+                color = get_color_box(clean)
+                
+                # STATUS LOGIC
+                # If we have a live map (JS), use it. 
+                # If ID is missing from live map, it means it's HIDDEN/SOLD OUT.
+                if vid in live_map:
+                    is_avail = live_map[vid]
+                else:
+                    # If we sourced from HTML and it's not in Live Map -> Unavailable
+                    if source_type == "HTML":
+                        is_avail = False
+                    else:
+                        is_avail = v.get('available', False)
+
+                is_pre = "PRE-ORDER" in str(raw).upper() or "PRODUCTION" in str(raw).upper()
+
+                if not is_avail:
+                    disp = f'{color} <div class="out-box">{clean}</div>'
+                    stat = '<span class="out-text">Out of Stock</span>'
+                elif is_pre:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="pre">Pre-Order</span></a>'
+                else:
+                    disp = f'{color} {clean}'
+                    stat = f'<a href="{link}" target="_parent"><span class="avail">In Stock</span></a>'
+
+                html += f'<tr><td>{disp}</td><td>{stat}</td></tr>'
+            
+            html += '</tbody></table>'
+
+        except Exception as e:
+            print(f"Error: {e}")
+            
+    html += "</body></html>"
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+if __name__ == "__main__":
+    fetch_seat_data()

@@ -17,16 +17,27 @@ SHOP_LINKS = {
     "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
 }
 
-# Simplified Master List to match your raw data better
-MASTER_LIST = [
-    "Black Basketweave", "Black Real Leather", "Grey Basketweave", 
-    "Grey Rodeo", "Brown Microweave", "Grey Five Bar", "MB Rodeo", 
-    "Black Cloth", "Black Corduroy", "Black Pepita", "Real Leather", "Black Leatherette"
-]
+# Color Mapping for the little boxes
+COLORS = {
+    "Black": "#000", "Real Leather": "#000", "Grey": "#666", 
+    "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"
+}
+
+def get_color_box(title):
+    c = "#ccc" 
+    if title:
+        for k, v in COLORS.items():
+            if k.upper() in title.upper():
+                c = v
+                break
+    return f'<span class="box" style="background-color: {c};"></span>'
 
 def clean_title(raw):
-    # Simplifies "Black / Black Basketweave - ... Pre-Order" to just "Black Basketweave"
-    t = str(raw).split(' - ')[0].strip()
+    # Cleans "Black / Black Basketweave - CURRENTLY IN PRODUCTION" -> "Black Basketweave"
+    t = str(raw)
+    if ' / ' in t:
+        t = t.split(' / ')[-1].strip()
+    t = t.split(' - ')[0].strip()
     return t
 
 def fetch_seat_data():
@@ -35,10 +46,10 @@ def fetch_seat_data():
     h = []
     h.append('<!DOCTYPE html><html><head>')
     h.append('<meta http-equiv="refresh" content="300">')
-    h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;}</style></head><body>')
+    h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    # FINAL VERSION
-    h.append(f'<h3>In Stock in Portland <span class="ver">v13.0</span> <span class="date">{now}</span></h3>')
+    # v15.0 BADGE
+    h.append(f'<h3>In Stock in Portland <span class="ver">v15.0</span> <span class="date">{now}</span></h3>')
 
     headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -54,33 +65,36 @@ def fetch_seat_data():
 
             for v in variants:
                 raw_title = v.get('title', '')
-                is_available = v.get('available', False)
                 
-                # INTELLIGENT LOGIC:
-                # 1. Is it technically in stock? -> YES
-                # 2. Does it say "Pre-Order" in the name? -> YES
-                is_preorder = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
+                # --- NEW LOGIC START ---
+                # Check the NAME for the "Pre-Order" warning.
+                is_preorder_text = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
                 
-                # Determine Status
                 status_text = ""
                 status_class = ""
                 
-                if is_available:
-                    status_text = "In Stock"
-                elif is_preorder:
+                if is_preorder_text:
+                    # If name says "Pre-Order", mark it Orange
                     status_text = "Pre-Order"
                     status_class = "pre"
+                else:
+                    # If name is CLEAN, assume it is IN STOCK (Green)
+                    # We ignore the hidden 'available' flag because it lies.
+                    status_text = "In Stock"
+                    status_class = "" # Default Green style
                 
-                # Only show if we have a valid status (Stock OR Pre-Order)
+                # --- NEW LOGIC END ---
+
                 if status_text:
                     clean = clean_title(raw_title)
-                    rows += f'<tr><td>{clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'
+                    box = get_color_box(raw_title)
+                    rows += f'<tr><td>{box} {clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'
 
             if rows:
                 h.append(f'<div class="title">{model}</div><table>{rows}</tbody></table>')
 
         except Exception as e:
-            pass # Keep silent on errors for the clean version
+            pass 
 
     h.append('</body></html>')
     

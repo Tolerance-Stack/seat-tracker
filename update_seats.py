@@ -80,8 +80,8 @@ def fetch_seat_data():
     h.append('a.pre { color: #e67e22; }')
     h.append('</style></head><body>')
     
-    # v8.0 Badge (Blue)
-    h.append(f'<h3>In Stock in Portland <span class="ver">v8.0</span> <span class="date">{now}</span></h3>')
+    # v10.0 Badge (Blue)
+    h.append(f'<h3>In Stock in Portland <span class="ver">v10.0</span> <span class="date">{now}</span></h3>')
 
     for model, url in PRODUCTS.items():
         try:

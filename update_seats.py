@@ -3,7 +3,6 @@ import json
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# We use the JSON feed to get deep data (Policies, Options, etc.)
 PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f.json",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.json",
@@ -18,7 +17,6 @@ SHOP_LINKS = {
     "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
 }
 
-# --- MASTER LIST ---
 MASTER_LIST = [
     "Black Basketweave Cloth with Black Leatherette Bolsters",
     "Black Real Leather",
@@ -61,95 +59,61 @@ def fetch_seat_data():
     ua = {'User-Agent': 'Mozilla/5.0'}
     now = datetime.now().strftime("%H:%M UTC")
     
-    # HTML HEADER
     h = []
     h.append('<!DOCTYPE html><html><head>')
     h.append('<meta http-equiv="refresh" content="300">')
-    h.append('<meta http-equiv="cache-control" content="no-cache">')
-    h.append('<style>')
-    h.append('body { font-family: sans-serif; padding: 10px; }')
-    h.append('h3 { border-bottom: 2px solid #333; padding-bottom: 10px; }')
-    h.append('.ver { background: #3498db; color: white; padding: 2px 5px; border-radius: 3px; font-size: 0.8em; }')
-    h.append('.date { font-size: 0.8em; color: #666; float: right; }')
-    h.append('table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }')
-    h.append('.title { background: #f4f4f4; padding: 10px; font-weight: bold; }')
-    h.append('th { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; }')
-    h.append('td { padding: 10px; border-bottom: 1px solid #eee; }')
-    h.append('.box { display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 1px solid #ccc; }')
-    h.append('a { text-decoration: none; color: #27ae60; font-weight: bold; }')
-    h.append('a.pre { color: #e67e22; }')
-    h.append('</style></head><body>')
+    h.append('<style>body{font-family:sans-serif;padding:20px;} table{width:100%;border-collapse:collapse;} th,td{padding:10px;border-bottom:1px solid #ddd;} .ver{background:blue;color:white;padding:3px;}</style></head><body>')
     
-    # v10.0 Badge (Blue)
-    h.append(f'<h3>In Stock in Portland <span class="ver">v10.0</span> <span class="date">{now}</span></h3>')
+    # UPDATE THIS VERSION NUMBER
+    h.append(f'<h3>In Stock in Portland <span class="ver">v11.0</span> <span class="date">{now}</span></h3>')
 
     for model, url in PRODUCTS.items():
         try:
-            print(f"Checking {model}...")
+            print(f"--- CHECKING {model} ---") # DEBUG
             
             rows = ""
             link = SHOP_LINKS.get(model, "#")
+            resp = requests.get(url, headers=ua)
+            
+            if resp.status_code != 200:
+                print(f"ERROR: Failed to fetch {url} (Status: {resp.status_code})")
+                continue
 
-            try:
-                # REQUEST JSON FEED
-                resp = requests.get(url, headers=ua)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    variants = data.get('product', {}).get('variants', [])
+            data = resp.json()
+            variants = data.get('product', {}).get('variants', [])
+            
+            print(f"Found {len(variants)} total variants in JSON.") # DEBUG
+
+            for v in variants:
+                # DEBUG: Print every single item it finds so we see why it fails
+                raw_title = v.get('title', 'Unknown')
+                is_available = v.get('available', False)
+                clean = clean_title(raw_title)
+                
+                print(f"   Analyzed: '{raw_title}' | Available: {is_available} | Cleaned: '{clean}'") # DEBUG
+
+                if is_available:
+                    matched_master = None
+                    for m in MASTER_LIST:
+                        if m in clean or clean in m:
+                            matched_master = m
+                            break
                     
-                    for v in variants:
-                        # CHECK IF AVAILABLE (Buyable)
-                        if v.get('available', False):
-                            
-                            # GATHER DATA POINTS
-                            raw_title = v.get('title', '')
-                            option1 = v.get('option1') or ""
-                            option2 = v.get('option2') or ""
-                            policy = v.get('inventory_policy', '')
-                            
-                            clean = clean_title(raw_title)
-
-                            # CHECK MATCH AGAINST MASTER LIST
-                            matched_master = None
-                            for m in MASTER_LIST:
-                                if m in clean or clean in m:
-                                    matched_master = m
-                                    break
-                            
-                            if matched_master:
-                                box = get_color_box(matched_master)
-                                
-                                # --- THE SMART DETECTIVE LOGIC ---
-                                # 1. Check Title Text
-                                text_flag = "PRE-ORDER" in raw_title.upper() or "PRODUCTION" in raw_title.upper()
-                                # 2. Check Option Text (Hidden dropdown values)
-                                opt_flag = "PRE-ORDER" in option1.upper() or "PRODUCTION" in option1.upper()
-                                # 3. Check Inventory Policy ('continue' means selling without stock)
-                                policy_flag = (policy == 'continue')
-
-                                # If ANY flag is true, it is Pre-Order
-                                is_pre = text_flag or opt_flag or policy_flag
-                                
-                                row_start = f'<tr><td>{box} {matched_master}</td>'
-                                
-                                if is_pre:
-                                    stat = f'<td><a href="{link}" target="_parent" class="pre">Pre-Order</a></td></tr>'
-                                else:
-                                    stat = f'<td><a href="{link}" target="_parent">In Stock</a></td></tr>'
-                                
-                                rows += row_start + stat
-
-            except Exception as e:
-                print(f"JSON Error: {e}")
+                    if matched_master:
+                        print(f"      >>> MATCH! Adding to list.") # DEBUG
+                        box = get_color_box(matched_master)
+                        stat = f'<td><a href="{link}" target="_parent">In Stock</a></td></tr>'
+                        rows += f'<tr><td>{box} {matched_master}</td>{stat}'
+                    else:
+                        print(f"      >>> NO MATCH in Master List.") # DEBUG
+                else:
+                    print(f"      >>> SKIP (Not Available)") # DEBUG
 
             if rows:
-                h.append(f'<div class="title">{model}</div>')
-                h.append('<table><thead><tr><th width="70%">Option</th><th>Status</th></tr></thead><tbody>')
-                h.append(rows)
-                h.append('</tbody></table>')
+                h.append(f'<div class="title"><b>{model}</b></div><table><tbody>{rows}</tbody></table><br>')
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"CRASH ERROR on {model}: {e}")
             
     h.append('</body></html>')
     

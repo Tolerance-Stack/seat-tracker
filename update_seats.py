@@ -20,8 +20,8 @@ def fetch_seat_data():
     h.append('<style>body{font-family:sans-serif;padding:20px;} table{width:100%;border-collapse:collapse;margin-bottom:20px;} th,td{padding:8px;border-bottom:1px solid #ddd;} .ver{background:red;color:white;padding:3px;font-size:0.8em;} .instock{color:green;font-weight:bold;} .out{color:#ccc;}</style></head><body>')
     
     # NEW VERSION NUMBER
-    h.append(f'<h3>Inventory Diagnostic Mode <span class="ver">v12.0 - NO FILTERS</span> <span class="date">{now}</span></h3>')
-    h.append('<p><i>Showing RAW data from Scheel-mann.com...</i></p>')
+    h.append(f'<h3>Inventory Diagnostic Mode <span class="ver">v12.0 - RAW DATA</span> <span class="date">{now}</span></h3>')
+    h.append('<p><i>Showing ALL data found on Scheel-mann.com...</i></p>')
 
     headers = {'User-Agent': 'Mozilla/5.0'}
 

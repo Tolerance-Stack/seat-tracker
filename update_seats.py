@@ -8,7 +8,7 @@ PRODUCTS = {
     "Vario F": "https://scheel-mann.com/products/vario-f.json",
     "Vario F XXL": "https://scheel-mann.com/products/vario-f-xxl.json",
     "Vario F Klima": "https://scheel-mann.com/products/vario-f-klima.json",
-    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima-new.json"
+    "Vario F XXL Klima": "https://scheel-mann.com/products/vario-f-xxl-klima.json"
 }
 
 SHOP_LINKS = {

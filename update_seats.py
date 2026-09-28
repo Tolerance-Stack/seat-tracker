@@ -15,7 +15,7 @@ SHOP_LINKS = {
     "Vario F": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
     "Vario F XXL": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
     "Vario F Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat",
-    "Vario F XXL Klima": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-klima-seat"
+    "Vario F XXL Klima": ""Vario F XXL Klima": "[https://scheel-mann.com/products/vario-f-xxl-klima.json](https://scheel-mann.com/products/vario-f-xxl-klima.json)""
 }
 
 COLORS = {

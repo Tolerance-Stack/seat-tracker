@@ -2,11 +2,9 @@ import requests
 import json
 from datetime import datetime
 import time
+import urllib.parse
 
 # --- CONFIGURATION ---
-# We now pull the entire "Stocked Seating" collection in one single request
-COLLECTION_URL = "https://scheel-mann.com/collections/stocked-seating/products.json?limit=250"
-
 SHOP_LINKS = {
     "Vario F": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-seat",
     "Vario F XXL": "https://www.tolerance-stack.com/product-page/scheel-mann-vario-f-xxl-seat",
@@ -19,7 +17,6 @@ COLORS = {
     "Gray": "#666", "Brown": "#654321", "Tan": "#D2B48C"
 }
 
-# Ordered from most specific to least specific so XXL Klima is categorized correctly before a standard F
 TARGET_MODELS = [
     "Vario F XXL Klima",
     "Vario F XXL",
@@ -57,16 +54,20 @@ def fetch_seat_data():
     h.append('<meta http-equiv="refresh" content="300">')
     h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    h.append(f'<h3>In Stock in Portland <span class="ver">v17.0</span> <span class="date">{now}</span></h3>')
+    h.append(f'<h3>In Stock in Portland <span class="ver">v18.0</span> <span class="date">{now}</span></h3>')
 
-    print("--- STARTING UPDATE v17.0 ---")
+    print("--- STARTING UPDATE v18.0 ---")
 
     try:
-        # Cache buster to ensure we get live inventory data
-        buster_url = f"{COLLECTION_URL}&nocache={int(time.time())}"
+        # 1. Build target URL with cache buster
+        target_url = f"https://scheel-mann.com/collections/stocked-seating/products.json?limit=250&nocache={int(time.time())}"
         
-        print("Fetching full collection data from Scheel-mann...")
-        resp = requests.get(buster_url, headers=headers, timeout=15)
+        # 2. Encode and append to the proxy service to bypass Shopify's IP block
+        encoded_url = urllib.parse.quote(target_url, safe='')
+        proxy_url = f"https://api.allorigins.win/raw?url={encoded_url}"
+        
+        print("Fetching data through proxy to bypass IP block...")
+        resp = requests.get(proxy_url, headers=headers, timeout=20)
         print(f"Status Code: {resp.status_code}")
         
         if resp.status_code == 200:
@@ -74,14 +75,12 @@ def fetch_seat_data():
             products = data.get('products', [])
             print(f"Found {len(products)} total products in collection.")
             
-            # Dictionary to temporarily store the generated rows for each category
             categorized_rows = {m: "" for m in TARGET_MODELS}
 
             for p in products:
                 p_title = p.get('title', '')
                 variants = p.get('variants', [])
                 
-                # Figure out which category this product belongs to
                 matched_model = None
                 for m in TARGET_MODELS:
                     if m.upper() in p_title.upper():
@@ -96,7 +95,6 @@ def fetch_seat_data():
                 for v in variants:
                     raw_title = v.get('title', '')
                     
-                    # Clean up the title depending on how Scheel-mann formatted it
                     display_title = raw_title
                     if display_title.lower() == 'default title':
                         display_title = p_title.replace(matched_model, '').strip(" -")
@@ -113,7 +111,6 @@ def fetch_seat_data():
                     row_html = f'<tr><td>{box} {clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'
                     categorized_rows[matched_model] += row_html
 
-            # Build the final HTML in the standard display order: F, XXL, Klima, XXL Klima
             for model in reversed(TARGET_MODELS):
                 rows = categorized_rows[model]
                 if rows:

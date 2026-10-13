@@ -57,7 +57,6 @@ def fetch_seat_data():
         print("Fetching data through ScraperAPI residential proxy...")
         payload = {'api_key': SCRAPER_API_KEY, 'url': TARGET_URL}
         
-        # Increased timeout to 60s because residential proxies route through actual home networks
         resp = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         print(f"Status Code: {resp.status_code}")
         
@@ -75,3 +74,51 @@ def fetch_seat_data():
                 matched_model = None
                 for m in TARGET_MODELS:
                     if m.upper() in p_title.upper():
+                        matched_model = m
+                        break
+                
+                if not matched_model:
+                    continue
+
+                link = SHOP_LINKS.get(matched_model, "#")
+                
+                for v in variants:
+                    raw_title = v.get('title', '')
+                    
+                    display_title = raw_title
+                    if display_title.lower() == 'default title':
+                        display_title = p_title.replace(matched_model, '').strip(" -")
+                        if not display_title:
+                            display_title = p_title
+                            
+                    is_preorder = "PRE-ORDER" in display_title.upper() or "PRODUCTION" in display_title.upper()
+                    status_text = "Pre-Order" if is_preorder else "In Stock"
+                    status_class = "pre" if is_preorder else "" 
+                    
+                    clean = clean_title(display_title)
+                    box = get_color_box(display_title + " " + p_title)
+                    
+                    row_html = f'<tr><td>{box} {clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'
+                    categorized_rows[matched_model] += row_html
+
+            for model in reversed(TARGET_MODELS):
+                rows = categorized_rows[model]
+                if rows:
+                    h.append(f'<div class="title">{model}</div><table>{rows}</tbody></table>')
+                    
+        else:
+            print(f"ERROR: ScraperAPI failed. Content: {resp.text[:100]}")
+            h.append('<p style="color:red;">Error syncing with Scheel-mann database. Retrying soon.</p>')
+
+    except Exception as e:
+        print(f"CRASH: {e}")
+
+    h.append('</body></html>')
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write("".join(h))
+    
+    print("--- UPDATE COMPLETE ---")
+
+if __name__ == "__main__":
+    fetch_seat_data()

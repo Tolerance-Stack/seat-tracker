@@ -74,4 +74,4 @@ def fetch_seat_data():
                 
                 matched_model = None
                 for m in TARGET_MODELS:
-                    if m.upper()
+                    if m.upper() in p_title.upper():

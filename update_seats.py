@@ -54,24 +54,34 @@ def fetch_seat_data():
     h.append('<meta http-equiv="refresh" content="300">')
     h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    h.append(f'<h3>In Stock in Portland <span class="ver">v18.0</span> <span class="date">{now}</span></h3>')
+    h.append(f'<h3>In Stock in Portland <span class="ver">v18.1</span> <span class="date">{now}</span></h3>')
 
-    print("--- STARTING UPDATE v18.0 ---")
+    print("--- STARTING UPDATE v18.1 ---")
 
     try:
-        # 1. Build target URL with cache buster
         target_url = f"https://scheel-mann.com/collections/stocked-seating/products.json?limit=250&nocache={int(time.time())}"
-        
-        # 2. Encode and append to the proxy service to bypass Shopify's IP block
         encoded_url = urllib.parse.quote(target_url, safe='')
-        proxy_url = f"https://api.allorigins.win/raw?url={encoded_url}"
         
-        print("Fetching data through proxy to bypass IP block...")
-        resp = requests.get(proxy_url, headers=headers, timeout=20)
-        print(f"Status Code: {resp.status_code}")
+        # Redundant proxy list for reliability
+        proxies = [
+            f"https://api.codetabs.com/v1/proxy?quest={encoded_url}",
+            f"https://api.allorigins.win/raw?url={encoded_url}"
+        ]
         
-        if resp.status_code == 200:
-            data = resp.json()
+        data = None
+        for proxy_url in proxies:
+            print(f"Attempting proxy: {proxy_url.split('/')[2]}...")
+            try:
+                # Increased timeout to 45 seconds to accommodate slow free proxies
+                resp = requests.get(proxy_url, headers=headers, timeout=45)
+                print(f"   Status Code: {resp.status_code}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    break
+            except Exception as e:
+                print(f"   Proxy failed: {e}")
+        
+        if data and 'products' in data:
             products = data.get('products', [])
             print(f"Found {len(products)} total products in collection.")
             
@@ -117,7 +127,7 @@ def fetch_seat_data():
                     h.append(f'<div class="title">{model}</div><table>{rows}</tbody></table>')
                     
         else:
-            print(f"ERROR: Failed to fetch collection. Content: {resp.text[:100]}")
+            print("ERROR: All proxies failed or returned invalid data.")
             h.append('<p style="color:red;">Error syncing with Scheel-mann database. Retrying soon.</p>')
 
     except Exception as e:

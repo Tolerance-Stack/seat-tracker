@@ -48,20 +48,40 @@ def clean_title(raw):
     t = t.split(' - ')[0].strip()
     return t
 
-def get_inventory_from_html(html, variant_id):
-    # Forward search: pinpoint the exact ID and extract the nearest hidden inventory quantity
-    fw_pattern = r'["\']id["\']\s*:\s*' + str(variant_id) + r'(?:(?!["\']id["\']\s*:).){0,500}?["\']inventory_quantity["\']\s*:\s*(-?\d+)'
-    fw_match = re.search(fw_pattern, html, re.DOTALL)
-    if fw_match:
-        return int(fw_match.group(1))
+def is_preorder(html, variant_id):
+    vid = str(variant_id)
+    
+    # 1. Forward scan: inventory_quantity follows the ID
+    p1 = vid + r'["\',\}].{0,250}?"inventory_quantity"\s*:\s*(-?\d+)'
+    m1 = re.search(p1, html, re.DOTALL | re.IGNORECASE)
+    if m1 and int(m1.group(1)) <= 0:
+        return True
         
-    # Backward search failsafe
-    bw_pattern = r'["\']inventory_quantity["\']\s*:\s*(-?\d+)(?:(?!["\']id["\']\s*:).){0,500}?["\']id["\']\s*:\s*' + str(variant_id)
-    bw_match = re.search(bw_pattern, html, re.DOTALL)
-    if bw_match:
-        return int(bw_match.group(1))
+    # 2. Backward scan: inventory_quantity precedes the ID
+    p2 = r'"inventory_quantity"\s*:\s*(-?\d+).{0,250}?"id"\s*:\s*' + vid
+    m2 = re.search(p2, html, re.DOTALL | re.IGNORECASE)
+    if m2 and int(m2.group(1)) <= 0:
+        return True
+
+    # 3. Dictionary scan: hidden variant mapping object used by many themes
+    p3 = r'["\']' + vid + r'["\']\s*:\s*\{[^}]*?"inventory_quantity"\s*:\s*(-?\d+)'
+    m3 = re.search(p3, html, re.DOTALL | re.IGNORECASE)
+    if m3 and int(m3.group(1)) <= 0:
+        return True
         
-    return 1 # Default to in-stock if completely obscured
+    # 4. Deep proximity scan: checks the code 150 chars before and 300 chars after the ID 
+    # for ANY signs of a zero quantity or the word "pre-order"
+    starts = [m.start() for m in re.finditer(vid, html)]
+    for start in starts:
+        window = html[max(0, start - 150):min(len(html), start + 300)].lower()
+        if '"inventory_quantity":0' in window or '"inventory_quantity": 0' in window:
+            return True
+        if '"inventory_quantity":-1' in window or '"inventory_quantity": -1' in window:
+            return True
+        if 'pre-order' in window or 'preorder' in window:
+            return True
+            
+    return False
 
 def fetch_seat_data():
     now = datetime.now().strftime("%H:%M UTC")
@@ -71,9 +91,9 @@ def fetch_seat_data():
     h.append('<meta http-equiv="refresh" content="300">')
     h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    h.append(f'<h3>In Stock in Portland <span class="ver">v22.0</span> <span class="date">{now}</span></h3>')
+    h.append(f'<h3>In Stock in Portland <span class="ver">v23.0</span> <span class="date">{now}</span></h3>')
 
-    print("--- STARTING UPDATE v22.0 ---")
+    print("--- STARTING UPDATE v23.0 ---")
 
     categorized_rows = {m: "" for m in DISPLAY_ORDER}
 
@@ -84,11 +104,9 @@ def fetch_seat_data():
         print(f"Fetching Hybrid Data for {model}...")
         
         try:
-            # 1. Fetch JSON to get the clean IDs and titles
             j_payload = {'api_key': SCRAPER_API_KEY, 'url': json_url}
             j_resp = requests.get('http://api.scraperapi.com', params=j_payload, timeout=60)
             
-            # 2. Fetch HTML to parse the hidden inventory numbers
             h_payload = {'api_key': SCRAPER_API_KEY, 'url': base_url}
             h_resp = requests.get('http://api.scraperapi.com', params=h_payload, timeout=60)
             
@@ -116,12 +134,11 @@ def fetch_seat_data():
                     
                     variant_id = v.get('id')
                     
-                    # Extract real inventory from the raw HTML code using the ID
-                    qty = get_inventory_from_html(html_content, variant_id)
+                    # Run the 4-pronged aggressive scanner
+                    status_is_preorder = is_preorder(html_content, variant_id)
                     
-                    is_preorder = (qty <= 0)
-                    status_text = "Pre-Order" if is_preorder else "In Stock"
-                    status_class = "pre" if is_preorder else "" 
+                    status_text = "Pre-Order" if status_is_preorder else "In Stock"
+                    status_class = "pre" if status_is_preorder else "" 
                     
                     box = get_color_box(raw_title)
                     row_html = f'<tr><td>{box} {clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'

@@ -1,6 +1,5 @@
 import requests
 import json
-import re
 from datetime import datetime
 
 # --- CONFIGURATION ---
@@ -48,39 +47,19 @@ def clean_title(raw):
     t = t.split(' - ')[0].strip()
     return t
 
-def is_preorder(html, variant_id):
-    vid = str(variant_id)
-    
-    # 1. Forward scan: inventory_quantity follows the ID
-    p1 = vid + r'["\',\}].{0,250}?"inventory_quantity"\s*:\s*(-?\d+)'
-    m1 = re.search(p1, html, re.DOTALL | re.IGNORECASE)
-    if m1 and int(m1.group(1)) <= 0:
-        return True
-        
-    # 2. Backward scan: inventory_quantity precedes the ID
-    p2 = r'"inventory_quantity"\s*:\s*(-?\d+).{0,250}?"id"\s*:\s*' + vid
-    m2 = re.search(p2, html, re.DOTALL | re.IGNORECASE)
-    if m2 and int(m2.group(1)) <= 0:
-        return True
-
-    # 3. Dictionary scan: hidden variant mapping object used by many themes
-    p3 = r'["\']' + vid + r'["\']\s*:\s*\{[^}]*?"inventory_quantity"\s*:\s*(-?\d+)'
-    m3 = re.search(p3, html, re.DOTALL | re.IGNORECASE)
-    if m3 and int(m3.group(1)) <= 0:
-        return True
-        
-    # 4. Deep proximity scan: checks the code 150 chars before and 300 chars after the ID 
-    # for ANY signs of a zero quantity or the word "pre-order"
-    starts = [m.start() for m in re.finditer(vid, html)]
-    for start in starts:
-        window = html[max(0, start - 150):min(len(html), start + 300)].lower()
-        if '"inventory_quantity":0' in window or '"inventory_quantity": 0' in window:
-            return True
-        if '"inventory_quantity":-1' in window or '"inventory_quantity": -1' in window:
-            return True
-        if 'pre-order' in window or 'preorder' in window:
-            return True
-            
+def check_variant_html_for_preorder(base_url, variant_id):
+    # Fetch the exact page render for this specific seat color
+    variant_url = f"{base_url}?variant={variant_id}"
+    payload = {'api_key': SCRAPER_API_KEY, 'url': variant_url}
+    try:
+        resp = requests.get('http://api.scraperapi.com', params=payload, timeout=45)
+        if resp.status_code == 200:
+            html = resp.text.lower()
+            # Look for the exact warning text from the yellow banner
+            if "out of stock and is available for pre-order" in html or "currently out of stock" in html:
+                return True
+    except Exception as e:
+        pass
     return False
 
 def fetch_seat_data():
@@ -91,9 +70,9 @@ def fetch_seat_data():
     h.append('<meta http-equiv="refresh" content="300">')
     h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    h.append(f'<h3>In Stock in Portland <span class="ver">v23.0</span> <span class="date">{now}</span></h3>')
+    h.append(f'<h3>In Stock in Portland <span class="ver">v23.1</span> <span class="date">{now}</span></h3>')
 
-    print("--- STARTING UPDATE v23.0 ---")
+    print("--- STARTING UPDATE v23.1 ---")
 
     categorized_rows = {m: "" for m in DISPLAY_ORDER}
 
@@ -101,24 +80,18 @@ def fetch_seat_data():
         base_url = PRODUCT_BASE_URLS[model]
         json_url = f"{base_url}.json"
         
-        print(f"Fetching Hybrid Data for {model}...")
+        print(f"Fetching {model}...")
         
         try:
+            # 1. Fetch JSON to get the variant IDs
             j_payload = {'api_key': SCRAPER_API_KEY, 'url': json_url}
             j_resp = requests.get('http://api.scraperapi.com', params=j_payload, timeout=60)
             
-            h_payload = {'api_key': SCRAPER_API_KEY, 'url': base_url}
-            h_resp = requests.get('http://api.scraperapi.com', params=h_payload, timeout=60)
-            
-            print(f"   JSON Status: {j_resp.status_code} | HTML Status: {h_resp.status_code}")
-            
-            if j_resp.status_code == 200 and h_resp.status_code == 200:
+            if j_resp.status_code == 200:
                 data = j_resp.json()
-                product = data.get('product', {})
-                variants = product.get('variants', [])
-                html_content = h_resp.text
+                variants = data.get('product', {}).get('variants', [])
                 
-                print(f"   Found {len(variants)} variants.")
+                print(f"   Found {len(variants)} variants. Checking individual URLs...")
                 link = SHOP_LINKS.get(model, "#")
                 seen_titles = set()
                 
@@ -134,18 +107,18 @@ def fetch_seat_data():
                     
                     variant_id = v.get('id')
                     
-                    # Run the 4-pronged aggressive scanner
-                    status_is_preorder = is_preorder(html_content, variant_id)
+                    # 2. Fetch the specific URL for this exact variant to read the page text
+                    is_preorder = check_variant_html_for_preorder(base_url, variant_id)
                     
-                    status_text = "Pre-Order" if status_is_preorder else "In Stock"
-                    status_class = "pre" if status_is_preorder else "" 
+                    status_text = "Pre-Order" if is_preorder else "In Stock"
+                    status_class = "pre" if is_preorder else "" 
+                    print(f"      - {clean}: {status_text}")
                     
                     box = get_color_box(raw_title)
                     row_html = f'<tr><td>{box} {clean}</td><td><a href="{link}" target="_parent" class="{status_class}">{status_text}</a></td></tr>'
                     categorized_rows[model] += row_html
-                    
             else:
-                print(f"   ERROR: Failed to fetch. JSON: {j_resp.status_code}, HTML: {h_resp.status_code}")
+                print(f"   ERROR: Failed to fetch JSON. Status: {j_resp.status_code}")
         except Exception as e:
             print(f"   CRASH: {e}")
 

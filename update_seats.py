@@ -1,9 +1,10 @@
+import os
 import requests
 import json
 from datetime import datetime
 
 # --- CONFIGURATION ---
-SCRAPER_API_KEY = "c288ebe9bae2045147af00f7de7d2c43"
+ZENROWS_API_KEY = os.environ.get("ZENROWS_API_KEY")
 
 PRODUCT_BASE_URLS = {
     "Vario F": "https://scheel-mann.com/products/vario-f",
@@ -50,9 +51,9 @@ def clean_title(raw):
 def check_variant_html_for_preorder(base_url, variant_id):
     # Fetch the exact page render for this specific seat color
     variant_url = f"{base_url}?variant={variant_id}"
-    payload = {'api_key': SCRAPER_API_KEY, 'url': variant_url}
+    payload = {'apikey': ZENROWS_API_KEY, 'url': variant_url, 'antibot': 'true'}
     try:
-        resp = requests.get('http://api.scraperapi.com', params=payload, timeout=45)
+        resp = requests.get('https://api.zenrows.com/v1/', params=payload, timeout=45)
         if resp.status_code == 200:
             html = resp.text.lower()
             # Look for the exact warning text from the yellow banner
@@ -65,14 +66,18 @@ def check_variant_html_for_preorder(base_url, variant_id):
 def fetch_seat_data():
     now = datetime.now().strftime("%H:%M UTC")
     
+    if not ZENROWS_API_KEY:
+        print("CRASH: ZenRows API Key not found in environment variables.")
+        return
+        
     h = []
     h.append('<!DOCTYPE html><html><head>')
     h.append('<meta http-equiv="refresh" content="300">')
     h.append('<style>body{font-family:sans-serif;padding:10px;} h3{border-bottom:2px solid #333;padding-bottom:10px;} .ver{background:#3498db;color:white;padding:2px 5px;border-radius:3px;font-size:0.8em;} .date{font-size:0.8em;color:#666;float:right;} table{width:100%;border-collapse:collapse;margin-bottom:30px;} .title{background:#f4f4f4;padding:10px;font-weight:bold;} td{padding:10px;border-bottom:1px solid #eee;} a{text-decoration:none;color:#27ae60;font-weight:bold;} a.pre{color:#e67e22;} .box{display:inline-block;width:12px;height:12px;margin-right:8px;border:1px solid #ccc;vertical-align:middle;}</style></head><body>')
     
-    h.append(f'<h3>In Stock in Portland <span class="ver">v23.1</span> <span class="date">{now}</span></h3>')
+    h.append(f'<h3>In Stock in Portland <span class="ver">v25.1</span> <span class="date">{now}</span></h3>')
 
-    print("--- STARTING UPDATE v23.1 ---")
+    print("--- STARTING UPDATE v25.1 ---")
 
     categorized_rows = {m: "" for m in DISPLAY_ORDER}
 
@@ -83,9 +88,9 @@ def fetch_seat_data():
         print(f"Fetching {model}...")
         
         try:
-            # 1. Fetch JSON to get the variant IDs
-            j_payload = {'api_key': SCRAPER_API_KEY, 'url': json_url}
-            j_resp = requests.get('http://api.scraperapi.com', params=j_payload, timeout=60)
+            # 1. Fetch JSON to get the variant IDs via ZenRows
+            j_payload = {'apikey': ZENROWS_API_KEY, 'url': json_url, 'antibot': 'true'}
+            j_resp = requests.get('https://api.zenrows.com/v1/', params=j_payload, timeout=60)
             
             if j_resp.status_code == 200:
                 data = j_resp.json()
@@ -107,7 +112,7 @@ def fetch_seat_data():
                     
                     variant_id = v.get('id')
                     
-                    # 2. Fetch the specific URL for this exact variant to read the page text
+                    # 2. Fetch the specific URL for this exact variant to read the page text via ZenRows
                     is_preorder = check_variant_html_for_preorder(base_url, variant_id)
                     
                     status_text = "Pre-Order" if is_preorder else "In Stock"
